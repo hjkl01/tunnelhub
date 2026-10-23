@@ -27,6 +27,7 @@ fmt: ## 格式化 Rust 代码并检查前端 TypeScript
 	cd frontend && npx tsc --noEmit
 
 check: build-frontend ## 构建前端后检查 Rust 后端
+	cargo check --workspace
 
 clean: ## 清理构建产物和前端依赖
 	cargo clean
