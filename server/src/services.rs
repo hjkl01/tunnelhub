@@ -220,7 +220,7 @@ async fn delete_user_account(State(state): State<AppState>, Path(id): Path<i64>)
 struct AccessGroupWithMembers { id: i64, name: String, created_at: String, members: Vec<i64> }
 
 async fn list_groups(State(state): State<AppState>) -> Result<Json<Vec<AccessGroupWithMembers>>, (StatusCode, Json<ApiError>)> {
-    let groups = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM groups ORDER BY name COLLATE NOCASE")
+    let groups = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM user_groups ORDER BY name COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(internal_error)?;
     let mut result = Vec::with_capacity(groups.len());
     for group in groups {
@@ -234,18 +234,18 @@ async fn list_groups(State(state): State<AppState>) -> Result<Json<Vec<AccessGro
 async fn create_group(State(state): State<AppState>, Json(input): Json<CreateAccessGroup>) -> Result<(StatusCode, Json<AccessGroup>), (StatusCode, Json<ApiError>)> {
     let name = input.name.trim();
     if name.is_empty() || name.len() > 100 { return Err((StatusCode::BAD_REQUEST, ApiError::new("用户组名称不能为空且不能超过 100 个字符"))); }
-    let result = sqlx::query("INSERT INTO groups (name, created_at) VALUES (?, ?)").bind(name).bind(Utc::now().to_rfc3339()).execute(&state.pool).await;
+    let result = sqlx::query("INSERT INTO user_groups (name, created_at) VALUES (?, ?)").bind(name).bind(Utc::now().to_rfc3339()).execute(&state.pool).await;
     if let Err(e) = result { return Err(conflict_or_internal(e)); }
-    let row = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM groups WHERE name = ?").bind(name).fetch_one(&state.pool).await.map_err(internal_error)?;
+    let row = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM user_groups WHERE name = ?").bind(name).fetch_one(&state.pool).await.map_err(internal_error)?;
     Ok((StatusCode::CREATED, Json(row)))
 }
 async fn update_group(State(state): State<AppState>, Path(id): Path<i64>, Json(input): Json<UpdateAccessGroup>) -> Result<Json<AccessGroup>, (StatusCode, Json<ApiError>)> {
-    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM groups WHERE id = ?").bind(id).fetch_one(&state.pool).await.map_err(internal_error)?;
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM user_groups WHERE id = ?").bind(id).fetch_one(&state.pool).await.map_err(internal_error)?;
     if exists == 0 { return Err((StatusCode::NOT_FOUND, ApiError::new("用户组不存在"))); }
     if let Some(name) = input.name {
         let name = name.trim();
         if name.is_empty() || name.len() > 100 { return Err((StatusCode::BAD_REQUEST, ApiError::new("用户组名称不能为空且不能超过 100 个字符"))); }
-        let result = sqlx::query("UPDATE groups SET name = ? WHERE id = ?").bind(name).bind(id).execute(&state.pool).await;
+        let result = sqlx::query("UPDATE user_groups SET name = ? WHERE id = ?").bind(name).bind(id).execute(&state.pool).await;
         if let Err(e) = result { return Err(conflict_or_internal(e)); }
     }
     if let Some(members) = input.members {
@@ -257,11 +257,11 @@ async fn update_group(State(state): State<AppState>, Path(id): Path<i64>, Json(i
         }
         tx.commit().await.map_err(internal_error)?;
     }
-    let row = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM groups WHERE id = ?").bind(id).fetch_one(&state.pool).await.map_err(internal_error)?;
+    let row = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM user_groups WHERE id = ?").bind(id).fetch_one(&state.pool).await.map_err(internal_error)?;
     Ok(Json(row))
 }
 async fn delete_group(State(state): State<AppState>, Path(id): Path<i64>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
-    let result = sqlx::query("DELETE FROM groups WHERE id = ?").bind(id).execute(&state.pool).await.map_err(internal_error)?;
+    let result = sqlx::query("DELETE FROM user_groups WHERE id = ?").bind(id).execute(&state.pool).await.map_err(internal_error)?;
     if result.rows_affected() == 0 { return Err((StatusCode::NOT_FOUND, ApiError::new("用户组不存在"))); }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -283,7 +283,7 @@ async fn update_acl(State(state): State<AppState>, Path(id): Path<String>, Json(
             .bind(&id).bind(user_id).execute(&mut *tx).await.map_err(internal_error)?;
     }
     for group_id in input.groups {
-        sqlx::query("INSERT OR IGNORE INTO service_acl (service_id, subject_type, subject_id) SELECT ?, 'group', id FROM groups WHERE id = ?")
+        sqlx::query("INSERT OR IGNORE INTO service_acl (service_id, subject_type, subject_id) SELECT ?, 'group', id FROM user_groups WHERE id = ?")
             .bind(&id).bind(group_id).execute(&mut *tx).await.map_err(internal_error)?;
     }
     sqlx::query("UPDATE services SET access_mode = ?, updated_at = ? WHERE id = ?").bind(access_mode).bind(Utc::now().to_rfc3339()).bind(&id)
