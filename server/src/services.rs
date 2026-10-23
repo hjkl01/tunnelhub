@@ -214,6 +214,79 @@ async fn delete_user_account(State(state): State<AppState>, Path(id): Path<i64>)
 }
 
 
+async fn list_groups(State(state): State<AppState>) -> Result<Json<Vec<AccessGroup>>, (StatusCode, Json<ApiError>)> {
+    let rows = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM groups ORDER BY name COLLATE NOCASE")
+        .fetch_all(&state.pool).await.map_err(internal_error)?;
+    Ok(Json(rows))
+}
+async fn create_group(State(state): State<AppState>, Json(input): Json<CreateAccessGroup>) -> Result<(StatusCode, Json<AccessGroup>), (StatusCode, Json<ApiError>)> {
+    let name = input.name.trim();
+    if name.is_empty() || name.len() > 100 { return Err((StatusCode::BAD_REQUEST, ApiError::new("用户组名称不能为空且不能超过 100 个字符"))); }
+    let result = sqlx::query("INSERT INTO groups (name, created_at) VALUES (?, ?)").bind(name).bind(Utc::now().to_rfc3339()).execute(&state.pool).await;
+    if let Err(e) = result { return Err(conflict_or_internal(e)); }
+    let row = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM groups WHERE name = ?").bind(name).fetch_one(&state.pool).await.map_err(internal_error)?;
+    Ok((StatusCode::CREATED, Json(row)))
+}
+async fn update_group(State(state): State<AppState>, Path(id): Path<i64>, Json(input): Json<UpdateAccessGroup>) -> Result<Json<AccessGroup>, (StatusCode, Json<ApiError>)> {
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM groups WHERE id = ?").bind(id).fetch_one(&state.pool).await.map_err(internal_error)?;
+    if exists == 0 { return Err((StatusCode::NOT_FOUND, ApiError::new("用户组不存在"))); }
+    if let Some(name) = input.name {
+        let name = name.trim();
+        if name.is_empty() || name.len() > 100 { return Err((StatusCode::BAD_REQUEST, ApiError::new("用户组名称不能为空且不能超过 100 个字符"))); }
+        let result = sqlx::query("UPDATE groups SET name = ? WHERE id = ?").bind(name).bind(id).execute(&state.pool).await;
+        if let Err(e) = result { return Err(conflict_or_internal(e)); }
+    }
+    if let Some(members) = input.members {
+        let mut tx = state.pool.begin().await.map_err(internal_error)?;
+        sqlx::query("DELETE FROM group_members WHERE group_id = ?").bind(id).execute(&mut *tx).await.map_err(internal_error)?;
+        for member_id in members {
+            sqlx::query("INSERT OR IGNORE INTO group_members (group_id, member_id) SELECT ?, id FROM members WHERE id = ? AND enabled = 1")
+                .bind(id).bind(member_id).execute(&mut *tx).await.map_err(internal_error)?;
+        }
+        tx.commit().await.map_err(internal_error)?;
+    }
+    let row = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM groups WHERE id = ?").bind(id).fetch_one(&state.pool).await.map_err(internal_error)?;
+    Ok(Json(row))
+}
+async fn delete_group(State(state): State<AppState>, Path(id): Path<i64>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    let result = sqlx::query("DELETE FROM groups WHERE id = ?").bind(id).execute(&state.pool).await.map_err(internal_error)?;
+    if result.rows_affected() == 0 { return Err((StatusCode::NOT_FOUND, ApiError::new("用户组不存在"))); }
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn get_acl(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<ServiceAcl>, (StatusCode, Json<ApiError>)> {
+    let access_mode: Option<String> = sqlx::query_scalar("SELECT access_mode FROM services WHERE id = ?").bind(&id).fetch_optional(&state.pool).await.map_err(internal_error)?;
+    let access_mode = access_mode.ok_or_else(not_found)?;
+    let users = sqlx::query_scalar("SELECT subject_id FROM service_acl WHERE service_id = ? AND subject_type = 'user' ORDER BY subject_id").bind(&id).fetch_all(&state.pool).await.map_err(internal_error)?;
+    let groups = sqlx::query_scalar("SELECT subject_id FROM service_acl WHERE service_id = ? AND subject_type = 'group' ORDER BY subject_id").bind(&id).fetch_all(&state.pool).await.map_err(internal_error)?;
+    Ok(Json(ServiceAcl { access_mode, users, groups }))
+}
+async fn update_acl(State(state): State<AppState>, Path(id): Path<String>, Json(input): Json<UpdateServiceAcl>) -> Result<Json<ServiceAcl>, (StatusCode, Json<ApiError>)> {
+    let access_mode = validate_access_mode(&input.access_mode)?;
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM services WHERE id = ?").bind(&id).fetch_one(&state.pool).await.map_err(internal_error)?;
+    if exists == 0 { return Err(not_found()); }
+    let mut tx = state.pool.begin().await.map_err(internal_error)?;
+    sqlx::query("DELETE FROM service_acl WHERE service_id = ?").bind(&id).execute(&mut *tx).await.map_err(internal_error)?;
+    for user_id in input.users {
+        sqlx::query("INSERT OR IGNORE INTO service_acl (service_id, subject_type, subject_id) SELECT ?, 'user', id FROM members WHERE id = ? AND enabled = 1")
+            .bind(&id).bind(user_id).execute(&mut *tx).await.map_err(internal_error)?;
+    }
+    for group_id in input.groups {
+        sqlx::query("INSERT OR IGNORE INTO service_acl (service_id, subject_type, subject_id) SELECT ?, 'group', id FROM groups WHERE id = ?")
+            .bind(&id).bind(group_id).execute(&mut *tx).await.map_err(internal_error)?;
+    }
+    sqlx::query("UPDATE services SET access_mode = ?, updated_at = ? WHERE id = ?").bind(access_mode).bind(Utc::now().to_rfc3339()).bind(&id)
+        .execute(&mut *tx).await.map_err(internal_error)?;
+    tx.commit().await.map_err(internal_error)?;
+    get_acl(State(state), Path(id)).await
+}
+fn validate_access_mode(value: &str) -> Result<String, (StatusCode, Json<ApiError>)> {
+    match value {
+        "public" | "restricted" => Ok(value.to_string()),
+        _ => Err((StatusCode::BAD_REQUEST, ApiError::new("访问模式只能是 public 或 restricted"))),
+    }
+}
+
+
 fn required(value: String, field: &str) -> Result<String, (StatusCode, Json<ApiError>)> {
     let value = value.trim();
     if value.is_empty() {
