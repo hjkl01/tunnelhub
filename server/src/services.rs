@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::get,
     Json, Router,
 };
 use chrono::{SecondsFormat, Utc};
