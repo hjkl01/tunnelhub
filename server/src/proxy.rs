@@ -85,14 +85,14 @@ async fn forward(state: &AppState, request: Request<Body>, target: &str) -> Resp
     response
 }
 
-fn normalize_request_host(value: &str) -> &str {
+fn normalize_request_host(value: &str) -> String {
     let host = value.trim();
     let host = if host.starts_with('[') {
         host.split(']').next().unwrap_or_default().trim_start_matches('[')
     } else {
         host.split(':').next().unwrap_or_default()
     };
-    host.trim_end_matches('.')
+    host.trim_end_matches('.').to_ascii_lowercase()
 }
 
 fn strip_hop_by_hop_headers(headers: &mut HeaderMap) {
@@ -122,4 +122,16 @@ fn plain(status: StatusCode, message: &'static str) -> Response {
         "text/plain; charset=utf-8".parse().expect("static content type"),
     );
     response
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_request_host;
+
+    #[test]
+    fn normalizes_host_case_and_port() {
+        assert_eq!(normalize_request_host("App.Example.COM:8088"), "app.example.com");
+        assert_eq!(normalize_request_host("app.example.com."), "app.example.com");
+    }
 }
