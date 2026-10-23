@@ -33,7 +33,7 @@ docker compose up -d --build
 
 首次访问管理界面时，按页面提示创建唯一管理员账户（密码至少 12 个字符），然后用 Aegis、Google Authenticator 等兼容应用扫描二维码或手动输入密钥，并提交 6 位验证码确认绑定。成功后页面会展示 8 个一次性恢复码，请立即保存；每个恢复码只能使用一次。
 
-登录需要用户名、密码和 TOTP 验证码，也可用一个未使用的恢复码替代 TOTP 验证码。会话使用 HttpOnly、SameSite=Strict Cookie，默认 8 小时过期；登录失败次数按用户名限流。管理员密码使用 Argon2id 哈希存储，恢复码只保存哈希。通过 HTTPS 访问管理界面时，在 `.env` 中设置 `TUNNELHUB_COOKIE_SECURE=true`，然后重建容器；仅本机 HTTP 访问时保持 `false`。
+登录需要用户名、密码和 TOTP 验证码，也可用一个未使用的恢复码替代 TOTP 验证码。会话使用 HttpOnly、SameSite=Strict Cookie，默认 8 小时过期；登录失败次数按用户名限流。管理员密码使用 Argon2id 哈希存储，恢复码只保存哈希。默认启用 `TUNNELHUB_COOKIE_SECURE=true`，推荐通过 HTTPS 访问管理界面。若仅使用纯 HTTP，且浏览器未在 localhost 场景发送 Secure Cookie，才在 `.env` 中显式设置 `TUNNELHUB_COOKIE_SECURE=false`。
 
 认证表和服务配置保存在 Docker 命名卷 `tunnelhub_data` 中。请备份该卷；若丢失 TOTP 设备，可使用一次性恢复码登录。当前版本没有自助重置密码或多管理员功能。
 
