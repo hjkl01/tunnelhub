@@ -1,3 +1,4 @@
+use argon2::{password_hash::{PasswordHasher, SaltString}, Argon2};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -5,6 +6,7 @@ use axum::{
     Json, Router,
 };
 use chrono::{SecondsFormat, Utc};
+use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use url::Url;
@@ -19,6 +21,7 @@ pub struct Service {
     pub hostname: String,
     pub target_url: String,
     pub enabled: bool,
+    pub access_mode: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -29,6 +32,7 @@ pub struct CreateService {
     pub hostname: String,
     pub target_url: String,
     pub enabled: Option<bool>,
+    pub access_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,11 +58,16 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_services).post(create_service))
         .route("/{id}", get(get_service).put(update_service).delete(delete_service))
+        .route("/{id}/acl", get(get_acl).put(update_acl))
+        .route("/access/users", get(list_users).post(create_user))
+        .route("/access/users/{id}", axum::routing::put(update_user).delete(delete_user_account))
+        .route("/access/groups", get(list_groups).post(create_group))
+        .route("/access/groups/{id}", axum::routing::put(update_group).delete(delete_group))
 }
 
 async fn list_services(State(state): State<AppState>) -> Result<Json<Vec<Service>>, (StatusCode, Json<ApiError>)> {
     let rows = sqlx::query_as::<_, Service>(
-        "SELECT id, name, hostname, target_url, enabled, created_at, updated_at FROM services ORDER BY name COLLATE NOCASE"
+        "SELECT id, name, hostname, target_url, enabled, access_mode, created_at, updated_at FROM services ORDER BY name COLLATE NOCASE"
     )
     .fetch_all(&state.pool)
     .await
@@ -71,7 +80,7 @@ async fn get_service(
     Path(id): Path<String>,
 ) -> Result<Json<Service>, (StatusCode, Json<ApiError>)> {
     let row = sqlx::query_as::<_, Service>(
-        "SELECT id, name, hostname, target_url, enabled, created_at, updated_at FROM services WHERE id = ?"
+        "SELECT id, name, hostname, target_url, enabled, access_mode, created_at, updated_at FROM services WHERE id = ?"
     )
     .bind(id)
     .fetch_optional(&state.pool)
@@ -91,9 +100,10 @@ async fn create_service(
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let id = Uuid::new_v4().to_string();
     let enabled = input.enabled.unwrap_or(true);
+    let access_mode = validate_access_mode(input.access_mode.as_deref().unwrap_or("public"))?;
 
-    sqlx::query("INSERT INTO services (id, name, hostname, target_url, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .bind(&id).bind(&name).bind(&hostname).bind(&target_url).bind(enabled).bind(&now).bind(&now)
+    sqlx::query("INSERT INTO services (id, name, hostname, target_url, enabled, access_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .bind(&id).bind(&name).bind(&hostname).bind(&target_url).bind(enabled).bind(access_mode).bind(&now).bind(&now)
         .execute(&state.pool).await.map_err(conflict_or_internal)?;
 
     let service = fetch_by_id(&state, id).await?;
@@ -110,10 +120,11 @@ async fn update_service(
     let hostname = match input.hostname { Some(value) => normalize_hostname(&value)?, None => current.hostname };
     let target_url = match input.target_url { Some(value) => validate_target(&value)?, None => current.target_url };
     let enabled = input.enabled.unwrap_or(current.enabled);
+    let access_mode = validate_access_mode(input.access_mode.as_deref().unwrap_or(&current.access_mode))?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
 
-    sqlx::query("UPDATE services SET name = ?, hostname = ?, target_url = ?, enabled = ?, updated_at = ? WHERE id = ?")
-        .bind(name).bind(hostname).bind(target_url).bind(enabled).bind(now).bind(&id)
+    sqlx::query("UPDATE services SET name = ?, hostname = ?, target_url = ?, enabled = ?, access_mode = ?, updated_at = ? WHERE id = ?")
+        .bind(name).bind(hostname).bind(target_url).bind(enabled).bind(access_mode).bind(now).bind(&id)
         .execute(&state.pool).await.map_err(conflict_or_internal)?;
     Ok(Json(fetch_by_id(&state, id).await?))
 }
