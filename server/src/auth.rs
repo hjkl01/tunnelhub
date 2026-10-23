@@ -90,11 +90,12 @@ impl AuthError {
 
 
 async fn require_admin_host(request: Request, next: Next) -> Response {
-    let allowed = request
-        .headers()
-        .get("x-tunnelhub-admin")
-        .and_then(|value| value.to_str().ok())
-        == Some("1");
+    let configured_host = env::var("TUNNELHUB_UI_HOST").unwrap_or_else(|_| "localhost".to_string());
+    let request_host = request.headers().get(header::HOST).and_then(|value| value.to_str().ok());
+    let allowed = request_host
+        .map(normalize_hostname)
+        .zip(Some(normalize_hostname(&configured_host)))
+        .is_some_and(|(actual, configured)| actual == configured);
     if !allowed {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -462,6 +463,16 @@ fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
         .split(';')
         .filter_map(|pair| pair.trim().split_once('='))
         .find_map(|(key, value)| (key == name).then_some(value))
+}
+
+fn normalize_hostname(value: &str) -> String {
+    let value = value.trim();
+    let host = if value.starts_with('[') {
+        value.split(']').next().unwrap_or_default().trim_start_matches('[')
+    } else {
+        value.split(':').next().unwrap_or_default()
+    };
+    host.trim_end_matches('.').to_ascii_lowercase()
 }
 
 fn same_origin(headers: &HeaderMap) -> bool {
