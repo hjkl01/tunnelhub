@@ -27,20 +27,7 @@ cd tunnelhub
 docker compose up -d --build
 ```
 
-默认管理界面地址为 http://localhost:8088。默认管理域名是 localhost；正式部署时，在 .env 中设置你用于管理界面的域名：
-
-```dotenv
-TUNNELHUB_UI_HOST=dashboard.example.com
-TUNNELHUB_PORT=8088
-```
-
-然后重新创建容器：
-
-```bash
-docker compose up -d --build
-```
-
-将 dashboard.example.com 的流量通过你自己的 FRP 入口转发到 TunnelHub。其他 Host 域名会进入服务反向代理。管理界面/API 尚未提供用户登录认证，不要将管理域名暴露给不可信用户。
+默认管理界面地址为 http://localhost:8088，默认管理域名是 localhost。管理界面/API 目前没有用户登录认证，因此**不要将管理域名加入 FRP 公网映射**。FRP 只需把你希望公开的业务服务域名转发到宿主机的 8088 端口。这样管理界面保持宿主机本地访问，业务域名进入反向代理。若需要从其他设备管理，可使用 SSH 本地端口转发，或先为管理界面增加认证后再公开。
 
 ## 添加服务
 
