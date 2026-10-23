@@ -11,7 +11,7 @@ type Service = {
   updated_at: string
 }
 type Draft = { name: string; hostname: string; target_url: string; enabled: boolean }
-const emptyDraft: Draft = { name: '', hostname: '', target_url: 'http://127.0.0.1:3000', enabled: true }
+const emptyDraft: Draft = { name: '', hostname: '', target_url: 'http://host.docker.internal:3000', enabled: true }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
