@@ -5,7 +5,7 @@ mod state;
 use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState { pool, client };
     let app = Router::new()
         .route("/api/health", get(health))
-        .nest("/api/services", services::router().route_layer(middleware::from_fn(require_admin_api)))
+        .nest("/api/services", services::router().route_layer(middleware::from_fn_with_state(state.clone(), require_admin_api)))
         .fallback(proxy::handle)
         .with_state(state)
         .layer(TraceLayer::new_for_http());
@@ -94,14 +94,14 @@ fn default_database_url() -> String {
 }
 
 
-async fn require_admin_api(request: Request, next: Next) -> Response {
+async fn require_admin_api(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let trusted = request
         .headers()
         .get("x-tunnelhub-admin")
         .and_then(|value| value.to_str().ok())
         == Some("1");
     if !trusted {
-        return StatusCode::NOT_FOUND.into_response();
+        return proxy::handle(State(state), request).await;
     }
     next.run(request).await
 }
