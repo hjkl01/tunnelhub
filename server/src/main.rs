@@ -1,3 +1,4 @@
+mod agent;
 mod services;
 mod state;
 
@@ -47,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/health", get(health))
         .nest("/api/services", services::router())
+        .nest("/api/agent", agent::router())
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
