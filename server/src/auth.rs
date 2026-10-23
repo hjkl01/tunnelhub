@@ -34,6 +34,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/status", get(status))
         .route("/setup", post(setup))
+        .route("/totp/pending", get(pending_totp))
         .route("/totp/confirm", post(confirm_totp))
         .route("/login", post(login))
         .route("/logout", post(logout))
@@ -152,6 +153,28 @@ async fn setup(
 
     let issuer = "TunnelHub";
     let account = format!("{issuer}:{}", username);
+    let uri = format!(
+        "otpauth://totp/{}?secret={}&issuer={}&algorithm=SHA1&digits=6&period=30",
+        percent_encode(&account),
+        secret,
+        percent_encode(issuer),
+    );
+    Ok(Json(SetupResponse { secret, otpauth_uri: uri }))
+}
+
+
+async fn pending_totp(
+    State(state): State<AppState>,
+) -> Result<Json<SetupResponse>, (StatusCode, Json<AuthError>)> {
+    let row = sqlx::query("SELECT username, totp_secret FROM admin_users WHERE totp_enabled = 0 ORDER BY id LIMIT 1")
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(internal_error)?
+        .ok_or_else(|| AuthError::response(StatusCode::NOT_FOUND, "没有待确认的 TOTP 绑定"))?;
+    let username: String = row.get("username");
+    let secret: String = row.get("totp_secret");
+    let issuer = "TunnelHub";
+    let account = format!("{issuer}:{username}");
     let uri = format!(
         "otpauth://totp/{}?secret={}&issuer={}&algorithm=SHA1&digits=6&period=30",
         percent_encode(&account),
