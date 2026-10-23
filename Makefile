@@ -1,7 +1,7 @@
-.PHONY: dev build build-server build-agent build-frontend fmt check clean
+.PHONY: dev dev-server dev-agent dev-frontend build build-server build-agent build-frontend fmt check clean
 
 dev:
-	@echo "启动后端与前端开发服务。需要分别在终端执行 make dev-server 和 make dev-frontend。"
+	@set -m; cargo run -p tunnelhub-server & server_pid=$$!; (cd frontend && npm run dev) & frontend_pid=$$!; trap 'kill $$server_pid $$frontend_pid 2>/dev/null || true' INT TERM EXIT; wait
 
 dev-server:
 	cargo run -p tunnelhub-server
