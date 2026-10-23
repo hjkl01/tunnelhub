@@ -40,6 +40,12 @@ async fn main() -> anyhow::Result<()> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
         .execute(&pool)
         .await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS auth_login_attempts (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL, attempted_at TEXT NOT NULL)")
+        .execute(&pool)
+        .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_user_time ON auth_login_attempts(username, attempted_at)")
+        .execute(&pool)
+        .await?;
     sqlx::query("CREATE TABLE IF NOT EXISTS recovery_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, code_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, used_at TEXT)")
         .execute(&pool)
         .await?;
