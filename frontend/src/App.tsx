@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import { Activity, ArrowUpRight, CircleHelp, Globe2, LayoutDashboard, LogOut, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, Waypoints, X } from 'lucide-react'
 
 type Service = {
@@ -269,7 +270,7 @@ export default function App() {
           <div className="auth-eyebrow">TWO-FACTOR AUTHENTICATION</div>
           <h1>绑定验证器</h1>
           <p className="auth-description">在 Aegis、Google Authenticator 或其他兼容应用中添加账户。可扫描 URI（若你的验证器支持）或手动输入密钥。</p>
-          <div className="totp-secret"><span>密钥</span><code>{setupInfo.secret}</code><button type="button" className="secondary-button" onClick={() => void navigator.clipboard?.writeText(setupInfo.secret)}>复制密钥</button></div>
+          <div className="totp-qr"><QRCodeSVG value={setupInfo.otpauth_uri} size={176} level="M" /></div><div className="totp-secret"><span>密钥</span><code>{setupInfo.secret}</code><button type="button" className="secondary-button" onClick={() => void navigator.clipboard?.writeText(setupInfo.secret)}>复制密钥</button></div>
           <details className="otpauth-details"><summary>显示 otpauth URI</summary><code>{setupInfo.otpauth_uri}</code></details>
           <form className="auth-form" onSubmit={submitTotp}>
             <label>6 位动态验证码<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} /></label>
