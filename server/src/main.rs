@@ -1,3 +1,4 @@
+mod proxy;
 mod services;
 mod state;
 
@@ -43,10 +44,15 @@ async fn main() -> anyhow::Result<()> {
     .execute(&pool)
     .await?;
 
-    let state = AppState { pool };
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    let state = AppState { pool, client };
     let app = Router::new()
         .route("/api/health", get(health))
         .nest("/api/services", services::router())
+        .fallback(proxy::handle)
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
