@@ -5,7 +5,7 @@ use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
 use axum::{routing::get, Router};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::state::AppState;
@@ -48,7 +48,6 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/health", get(health))
         .nest("/api/services", services::router())
         .with_state(state)
-        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
     let address: SocketAddr = env::var("TUNNELHUB_LISTEN")
