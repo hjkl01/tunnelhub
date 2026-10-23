@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::State,
-    http::{header::HOST, HeaderMap, Request, StatusCode},
+    http::{header::HOST, HeaderMap, HeaderValue, Request, StatusCode},
     response::Response,
 };
 use reqwest::Url;
@@ -57,8 +57,15 @@ async fn forward(state: &AppState, request: Request<Body>, target: &str) -> Resp
     target_url.set_query(parts.uri.query());
 
     let mut headers = parts.headers;
+    let original_host = headers.get(HOST).cloned();
     strip_hop_by_hop_headers(&mut headers);
     headers.remove(HOST);
+    if let Some(host) = original_host {
+        headers.insert("x-forwarded-host", host);
+    }
+    if !headers.contains_key("x-forwarded-proto") {
+        headers.insert("x-forwarded-proto", HeaderValue::from_static("http"));
+    }
 
     let upstream = match state
         .client
