@@ -91,7 +91,6 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/health", get(health))
         .nest("/api/auth", auth::router())
-        .nest("/api/access", access::router().route_layer(middleware::from_fn_with_state(state.clone(), auth::require_session)))
         .nest("/api/services", services::router().route_layer(middleware::from_fn_with_state(state.clone(), auth::require_session)))
         .fallback(proxy::handle)
         .with_state(state)
