@@ -19,6 +19,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    environment:
+      TUNNELHUB_UI_HOST: ${TUNNELHUB_UI_HOST:-localhost}
+      NGINX_ENVSUBST_FILTER: ^TUNNELHUB_UI_HOST$
     depends_on:
       - server
     ports:
