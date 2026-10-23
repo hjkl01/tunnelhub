@@ -103,6 +103,17 @@ fn normalize_request_host(value: &str) -> String {
 }
 
 fn strip_hop_by_hop_headers(headers: &mut HeaderMap) {
+    let connection_headers: Vec<String> = headers
+        .get("connection")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            value
+                .split(',')
+                .map(|name| name.trim().to_ascii_lowercase())
+                .filter(|name| !name.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
     const HOP_BY_HOP: [&str; 8] = [
         "connection",
         "keep-alive",
@@ -117,7 +128,9 @@ fn strip_hop_by_hop_headers(headers: &mut HeaderMap) {
         headers.remove(name);
     }
 
-    // Strip the legacy proxy-specific hop-by-hop header as well.
+    for name in connection_headers {
+        headers.remove(name.as_str());
+    }
     headers.remove("proxy-connection");
 }
 
