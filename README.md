@@ -9,13 +9,13 @@ TunnelHub 不实现隧道协议，也不安装、配置、启停或升级 FRP、
 ```text
 公网用户
   -> 你自行维护的 FRP 入口
-  -> TunnelHub 前端容器端口（默认宿主机 8088）
+  -> TunnelHub 单容器端口（默认宿主机 8088）
   -> 按 Host 查询 SQLite 服务配置
   -> 反向代理到目标 URL
   -> 目标服务响应
 ```
 
-FRP 应将服务域名的 HTTP 请求转发到 TunnelHub 的前端入口，并保留原始 Host 请求头。TLS 可以在你现有的公网入口终止；TunnelHub 容器入口当前接收 HTTP。TunnelHub 不会修改 FRP、DNS 或 Caddy 配置。
+FRP 应将服务域名的 HTTP 请求转发到 TunnelHub 的统一入口，并保留原始 Host 请求头。TLS 可以在你现有的公网入口终止；TunnelHub 容器入口当前接收 HTTP。TunnelHub 不会修改 FRP、DNS 或 Caddy 配置。
 
 ## Docker 部署
 
@@ -35,7 +35,7 @@ docker compose up -d --build
 
 登录需要用户名、密码和 TOTP 验证码，也可用一个未使用的恢复码替代 TOTP 验证码。会话使用 HttpOnly、SameSite=Strict Cookie，默认 8 小时过期；登录失败次数按用户名限流。管理员密码使用 Argon2id 哈希存储，恢复码只保存哈希。默认启用 `TUNNELHUB_COOKIE_SECURE=true`，推荐通过 HTTPS 访问管理界面。若仅使用纯 HTTP，且浏览器未在 localhost 场景发送 Secure Cookie，才在 `.env` 中显式设置 `TUNNELHUB_COOKIE_SECURE=false`。业务访问会话也遵循同一设置。
 
-认证表和服务配置保存在 Docker 命名卷 `tunnelhub_data` 中。请备份该卷；若丢失 TOTP 设备，可使用一次性恢复码登录。当前管理后台仍是单管理员模型；业务用户由管理员在“用户与权限”页面创建，使用用户名和密码登录受限服务。业务用户目前不支持自行注册或 TOTP 绑定。
+前端由 Vite 构建后嵌入 Rust 可执行文件，运行时不需要单独的 Nginx 或前端容器。Docker 使用 Node 与 Rust 多阶段构建，最终只运行一个 TunnelHub 容器。认证表和服务配置保存在 Docker 命名卷 `tunnelhub_data` 中。请备份该卷；若丢失 TOTP 设备，可使用一次性恢复码登录。当前管理后台仍是单管理员模型；业务用户由管理员在“用户与权限”页面创建，使用用户名和密码登录受限服务。业务用户目前不支持自行注册或 TOTP 绑定。
 
 ## 添加服务
 
@@ -63,7 +63,7 @@ make build
 - API：http://127.0.0.1:8080
 - 健康检查：GET /api/health
 
-本地开发时，Vite 会为管理 API 请求添加内部标记。可通过 TUNNELHUB_LISTEN 设置 API 监听地址，通过 TUNNELHUB_DATABASE_URL 指定 SQLite 文件。
+本地开发时，Vite 代理管理 API 到 Rust 后端；运行构建版时，Rust 会直接提供嵌入的前端资源。可通过 TUNNELHUB_LISTEN 设置监听地址、TUNNELHUB_UI_HOST 设置管理界面允许使用的 Host、TUNNELHUB_DATABASE_URL 指定 SQLite 文件。
 
 ## 当前限制
 
