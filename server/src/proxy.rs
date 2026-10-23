@@ -1,4 +1,7 @@
+use std::{env, path::Path};
+
 use argon2::{password_hash::{PasswordHash, PasswordVerifier}, Argon2};
+use rust_embed::RustEmbed;
 use axum::{
     body::{to_bytes, Body},
     extract::State,
@@ -14,11 +17,21 @@ use sqlx::Row;
 
 use crate::state::AppState;
 
+#[derive(RustEmbed)]
+#[folder = "../frontend/dist/"]
+struct FrontendAssets;
+
 pub async fn handle(State(state): State<AppState>, request: Request<Body>) -> Response {
     let Some(host) = request.headers().get(HOST).and_then(|value| value.to_str().ok())
         .map(normalize_request_host).filter(|value| !value.is_empty()) else {
         return plain(StatusCode::BAD_REQUEST, "缺少有效的 Host 请求头");
     };
+
+    // 管理界面由 Rust 直接提供，且仅响应配置的管理域名。
+    let ui_host = env::var("TUNNELHUB_UI_HOST").unwrap_or_else(|_| "localhost".to_string());
+    if host == normalize_request_host(&ui_host) {
+        return serve_frontend(&request);
+    }
 
     let service = match sqlx::query_as::<_, (String, String, String)>(
         "SELECT id, target_url, access_mode FROM services WHERE hostname = ? AND enabled = 1",
@@ -241,6 +254,33 @@ async fn forward(state: &AppState, request: Request<Body>, target: &str) -> Resp
     let mut response = Response::new(Body::from_stream(upstream.bytes_stream()));
     *response.status_mut() = status;
     *response.headers_mut() = response_headers;
+    response
+}
+
+fn serve_frontend(request: &Request<Body>) -> Response {
+    let requested_path = request.uri().path().trim_start_matches('/');
+    let requested_path = if requested_path.is_empty() { "index.html" } else { requested_path };
+    let safe_path = Path::new(requested_path).components().all(|part| {
+        matches!(part, std::path::Component::Normal(_))
+    });
+    let asset_path = if safe_path && FrontendAssets::get(requested_path).is_some() {
+        requested_path
+    } else {
+        "index.html"
+    };
+
+    let Some(asset) = FrontendAssets::get(asset_path) else {
+        return plain(StatusCode::NOT_FOUND, "前端资源不存在，请重新构建应用");
+    };
+    let mut response = Response::new(Body::from(asset.data.into_owned()));
+    let content_type = mime_guess::from_path(asset_path).first_or_octet_stream();
+    if let Ok(value) = HeaderValue::from_str(content_type.as_ref()) {
+        response.headers_mut().insert(axum::http::header::CONTENT_TYPE, value);
+    }
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        HeaderValue::from_static(if asset_path == "index.html" { "no-cache" } else { "public, max-age=31536000, immutable" }),
+    );
     response
 }
 
