@@ -41,6 +41,7 @@ pub struct UpdateService {
     pub hostname: Option<String>,
     pub target_url: Option<String>,
     pub enabled: Option<bool>,
+    pub access_mode: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -146,7 +147,7 @@ async fn delete_service(
 
 async fn fetch_optional(state: &AppState, id: &str) -> Result<Option<Service>, (StatusCode, Json<ApiError>)> {
     sqlx::query_as::<_, Service>(
-        "SELECT id, name, hostname, target_url, enabled, created_at, updated_at FROM services WHERE id = ?"
+        "SELECT id, name, hostname, target_url, enabled, access_mode, created_at, updated_at FROM services WHERE id = ?"
     )
     .bind(id).fetch_optional(&state.pool).await.map_err(internal_error)
 }
