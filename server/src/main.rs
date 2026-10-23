@@ -5,13 +5,7 @@ mod state;
 
 use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
-use axum::{
-    extract::{Request, State},
-    middleware::{self, Next},
-    response::Response,
-    routing::get,
-    Router,
-};
+use axum::{middleware, routing::get, Router};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -107,23 +101,3 @@ fn default_database_url() -> String {
     format!("sqlite://{}", directory.join("tunnelhub.db").display())
 }
 
-
-async fn require_admin_api(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    let trusted = request
-        .headers()
-        .get("x-tunnelhub-admin")
-        .and_then(|value| value.to_str().ok())
-        == Some("1");
-    if !trusted {
-        let mut request = request;
-        let original_uri = request
-            .extensions()
-            .get::<axum::extract::OriginalUri>()
-            .map(|original| original.0.clone());
-        if let Some(uri) = original_uri {
-            *request.uri_mut() = uri;
-        }
-        return proxy::handle(State(state), request).await;
-    }
-    next.run(request).await
-}
