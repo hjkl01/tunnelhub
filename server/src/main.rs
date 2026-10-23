@@ -4,7 +4,14 @@ mod state;
 
 use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
-use axum::{routing::get, Router};
+use axum::{
+    extract::Request,
+    http::StatusCode,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::get,
+    Router,
+};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -51,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState { pool, client };
     let app = Router::new()
         .route("/api/health", get(health))
-        .nest("/api/services", services::router())
+        .nest("/api/services", services::router().route_layer(middleware::from_fn(require_admin_api)))
         .fallback(proxy::handle)
         .with_state(state)
         .layer(TraceLayer::new_for_http());
@@ -84,4 +91,17 @@ fn default_database_url() -> String {
         return "sqlite://tunnelhub.db".to_string();
     }
     format!("sqlite://{}", directory.join("tunnelhub.db").display())
+}
+
+
+async fn require_admin_api(request: Request, next: Next) -> Response {
+    let trusted = request
+        .headers()
+        .get("x-tunnelhub-admin")
+        .and_then(|value| value.to_str().ok())
+        == Some("1");
+    if !trusted {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    next.run(request).await
 }
