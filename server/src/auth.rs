@@ -465,7 +465,10 @@ fn same_origin(headers: &HeaderMap) -> bool {
     let Ok(url) = url::Url::parse(origin) else {
         return false;
     };
-    url.host_str().is_some_and(|origin_host| origin_host.eq_ignore_ascii_case(host.split(':').next().unwrap_or(host)))
+    let Ok(expected) = url::Url::parse(&format!("{}://{}", url.scheme(), host)) else {
+        return false;
+    };
+    url.origin().ascii_serialization() == expected.origin().ascii_serialization()
 }
 
 fn generate_secret() -> String {
