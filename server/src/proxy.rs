@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::State,
-    http::{header::HOST, HeaderMap, HeaderName, Request, StatusCode},
+    http::{header::HOST, HeaderMap, Request, StatusCode},
     response::Response,
 };
 use reqwest::Url;
@@ -110,9 +110,7 @@ fn strip_hop_by_hop_headers(headers: &mut HeaderMap) {
         headers.remove(name);
     }
 
-    // The Connection header can nominate additional hop-by-hop headers.
-    // It is removed above; standard hop-by-hop headers are stripped regardless.
-    let _ = HeaderName::from_static("proxy-connection");
+    // Strip the legacy proxy-specific hop-by-hop header as well.
     headers.remove("proxy-connection");
 }
 
