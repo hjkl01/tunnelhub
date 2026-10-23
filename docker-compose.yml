@@ -7,6 +7,7 @@ services:
     environment:
       TUNNELHUB_LISTEN: 0.0.0.0:8080
       TUNNELHUB_DATABASE_URL: sqlite:///data/tunnelhub.db
+      TUNNELHUB_COOKIE_SECURE: ${TUNNELHUB_COOKIE_SECURE:-false}
     volumes:
       - tunnelhub_data:/data
     extra_hosts:
