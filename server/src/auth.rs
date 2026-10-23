@@ -494,7 +494,7 @@ fn same_origin(headers: &HeaderMap) -> bool {
 fn generate_secret() -> String {
     let mut bytes = [0_u8; 20];
     OsRng.fill_bytes(&mut bytes);
-    base32::encode(Alphabet::RFC4648 { padding: false }, &bytes)
+    base32::encode(Alphabet::Rfc4648 { padding: false }, &bytes)
 }
 
 fn verify_totp(secret: &str, supplied: &str) -> bool {
@@ -512,7 +512,7 @@ fn verify_totp(secret: &str, supplied: &str) -> bool {
 }
 
 fn totp_code_for_counter(secret: &str, counter: u64) -> Option<String> {
-    let key = base32::decode(Alphabet::RFC4648 { padding: false }, secret)?;
+    let key = base32::decode(Alphabet::Rfc4648 { padding: false }, secret)?;
     let mut mac = HmacSha1::new_from_slice(&key).ok()?;
     mac.update(&counter.to_be_bytes());
     let digest = mac.finalize().into_bytes();
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn totp_matches_rfc_6238_sha1_six_digit_vector() {
         let secret = base32::encode(
-            Alphabet::RFC4648 { padding: false },
+            Alphabet::Rfc4648 { padding: false },
             b"12345678901234567890",
         );
         assert_eq!(totp_code_for_counter(&secret, 1).as_deref(), Some("287082"));
@@ -542,7 +542,7 @@ mod tests {
     #[test]
     fn generated_totp_secret_contains_twenty_random_bytes() {
         let secret = generate_secret();
-        let decoded = base32::decode(Alphabet::RFC4648 { padding: false }, &secret).unwrap();
+        let decoded = base32::decode(Alphabet::Rfc4648 { padding: false }, &secret).unwrap();
         assert_eq!(decoded.len(), 20);
     }
 }
