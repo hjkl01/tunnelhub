@@ -27,6 +27,15 @@ cd tunnelhub
 docker compose up -d --build
 ```
 
+从旧版“server + frontend”双容器升级时，先停止并移除旧容器，保留数据库卷，再构建新版本：
+
+```bash
+docker compose down --remove-orphans
+docker compose up -d --build
+```
+
+不要添加 `-v`，否则会删除保存用户、权限和服务配置的命名卷。
+
 默认管理界面地址为 http://localhost:8088，默认管理域名是 localhost。首次打开时创建管理员账户、设置密码并绑定 TOTP；后续登录必须同时提供密码和动态验证码；无法使用验证器时，可用一次性恢复码登录。**管理域名仍建议保持本机访问，不要加入 FRP 公网映射**，并可在“用户与权限”页面为业务服务配置访问策略。FRP 只需把需要公开的业务服务域名转发到宿主机的 8088 端口。
 
 ## 管理员登录与 TOTP
