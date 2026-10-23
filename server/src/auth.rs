@@ -247,19 +247,38 @@ async fn login(
     if !same_origin(&headers) {
         return Err(AuthError::response(StatusCode::FORBIDDEN, "请求来源校验失败"));
     }
+    let username = input.username.trim();
+    let since = (Utc::now() - ChronoDuration::minutes(15)).to_rfc3339();
+    let attempts: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM auth_login_attempts WHERE username = ? AND attempted_at > ?",
+    )
+    .bind(username)
+    .bind(since)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(internal_error)?;
+    if attempts >= 10 {
+        return Err(AuthError::response(StatusCode::TOO_MANY_REQUESTS, "登录失败次数过多，请 15 分钟后重试"));
+    }
+
     let row = sqlx::query(
         "SELECT id, username, password_hash, totp_secret, totp_enabled FROM admin_users WHERE username = ?",
     )
-    .bind(input.username.trim())
+    .bind(username)
     .fetch_optional(&state.pool)
     .await
-    .map_err(internal_error)?
-    .ok_or_else(|| AuthError::response(StatusCode::UNAUTHORIZED, "用户名或密码错误"))?;
+    .map_err(internal_error)?;
+    let Some(row) = row else {
+        record_login_failure(&state, username).await?;
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        return Err(AuthError::response(StatusCode::UNAUTHORIZED, "用户名或密码错误"));
+    };
 
     let password_hash: String = row.get("password_hash");
     let parsed = PasswordHash::new(&password_hash)
         .map_err(|_| AuthError::response(StatusCode::INTERNAL_SERVER_ERROR, "管理员凭据数据损坏"))?;
     if Argon2::default().verify_password(input.password.as_bytes(), &parsed).is_err() {
+        record_login_failure(&state, username).await?;
         tokio::time::sleep(Duration::from_millis(350)).await;
         return Err(AuthError::response(StatusCode::UNAUTHORIZED, "用户名或密码错误"));
     }
@@ -270,9 +289,15 @@ async fn login(
     let user_id: i64 = row.get("id");
     let secret: String = row.get("totp_secret");
     if !verify_totp(&secret, &input.code) && !consume_recovery_code(&state, &input.code).await? {
+        record_login_failure(&state, username).await?;
         tokio::time::sleep(Duration::from_millis(350)).await;
         return Err(AuthError::response(StatusCode::UNAUTHORIZED, "动态验证码或恢复码无效"));
     }
+    sqlx::query("DELETE FROM auth_login_attempts WHERE username = ?")
+        .bind(username)
+        .execute(&state.pool)
+        .await
+        .map_err(internal_error)?;
 
     let token = create_session(&state, user_id).await?;
     let mut response_headers = HeaderMap::new();
@@ -345,6 +370,24 @@ async fn create_session(
         .await
         .map_err(internal_error)?;
     Ok(token)
+}
+
+async fn record_login_failure(
+    state: &AppState,
+    username: &str,
+) -> Result<(), (StatusCode, Json<AuthError>)> {
+    sqlx::query("INSERT INTO auth_login_attempts (username, attempted_at) VALUES (?, ?)")
+        .bind(username)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&state.pool)
+        .await
+        .map_err(internal_error)?;
+    sqlx::query("DELETE FROM auth_login_attempts WHERE attempted_at < ?")
+        .bind((Utc::now() - ChronoDuration::hours(24)).to_rfc3339())
+        .execute(&state.pool)
+        .await
+        .map_err(internal_error)?;
+    Ok(())
 }
 
 async fn consume_recovery_code(
