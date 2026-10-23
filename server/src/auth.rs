@@ -437,11 +437,12 @@ fn session_cookie(token: &str) -> HeaderValue {
     } else {
         ""
     };
-    HeaderValue::from_str(&format!(
+    format!(
         "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{}",
         SESSION_HOURS * 3600,
         secure,
-    ))
+    )
+    .parse::<HeaderValue>()
     .expect("generated session cookie is valid")
 }
 
