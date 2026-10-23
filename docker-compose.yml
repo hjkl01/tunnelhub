@@ -25,4 +25,4 @@ services:
     depends_on:
       - server
     ports:
-      - "${TUNNELHUB_PORT:-8088}:80"
+      - "127.0.0.1:${TUNNELHUB_PORT:-8088}:80"
