@@ -165,6 +165,7 @@ function ServiceDashboard() {
         <div className="brand"><div className="brand-mark"><Waypoints size={21} /></div><span>Tunnel<span className="brand-light">Hub</span></span></div>
         <div className="workspace-label">工作空间</div>
         <button className={section === "services" ? "nav-item active" : "nav-item"} onClick={() => setSection("services")}><LayoutDashboard size={18} />服务管理</button>
+        <a className="nav-item" href="#access-control"><ShieldCheck size={18} />用户与权限</a>
         <button className="nav-item" onClick={() => setNotice('FRP 和 Caddy 由你自行部署与管理，TunnelHub 不会修改其配置。')}><Activity size={18} />网络组件 <span className="soon">外部管理</span></button>
         <button className="nav-item" onClick={() => setNotice('访问日志将在后续版本开放')}><ShieldCheck size={18} />访问日志 <span className="soon">即将推出</span></button>
         <div className="sidebar-bottom">
