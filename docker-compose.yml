@@ -1,5 +1,5 @@
 services:
-  server:
+  tunnelhub:
     build:
       context: .
       dockerfile: Dockerfile
@@ -8,25 +8,13 @@ services:
       TUNNELHUB_LISTEN: 0.0.0.0:8080
       TUNNELHUB_DATABASE_URL: sqlite:///data/tunnelhub.db
       TUNNELHUB_COOKIE_SECURE: ${TUNNELHUB_COOKIE_SECURE:-true}
+      TUNNELHUB_UI_HOST: ${TUNNELHUB_UI_HOST:-localhost}
     volumes:
       - tunnelhub_data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    expose:
-      - "8080"
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    environment:
-      TUNNELHUB_UI_HOST: ${TUNNELHUB_UI_HOST:-localhost}
-      NGINX_ENVSUBST_FILTER: ^TUNNELHUB_UI_HOST$
-    depends_on:
-      - server
     ports:
-      - "127.0.0.1:${TUNNELHUB_PORT:-8088}:80"
+      - "127.0.0.1:${TUNNELHUB_PORT:-8088}:8080"
 
 volumes:
   tunnelhub_data:
