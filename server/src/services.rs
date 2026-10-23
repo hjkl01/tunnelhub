@@ -64,6 +64,7 @@ pub fn router() -> Router<AppState> {
         .route("/access/users/{id}", axum::routing::put(update_user).delete(delete_user_account))
         .route("/access/groups", get(list_groups).post(create_group))
         .route("/access/groups/{id}", axum::routing::put(update_group).delete(delete_group))
+        .route("/access/groups/{id}/members", get(list_group_members))
 }
 
 async fn list_services(State(state): State<AppState>) -> Result<Json<Vec<Service>>, (StatusCode, Json<ApiError>)> {
