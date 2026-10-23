@@ -98,6 +98,12 @@ async fn require_admin_host(request: Request, next: Next) -> Response {
     if !allowed {
         return StatusCode::NOT_FOUND.into_response();
     }
+    let is_write = !matches!(*request.method(), axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS);
+    if is_write
+        && (!request.headers().contains_key(header::ORIGIN) || !same_origin(request.headers()))
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     next.run(request).await
 }
 
@@ -202,7 +208,7 @@ async fn confirm_totp(
     State(state): State<AppState>,
     Json(input): Json<CodeInput>,
 ) -> Result<(HeaderMap, Json<RecoveryResponse>), (StatusCode, Json<AuthError>)> {
-    let row = sqlx::query("SELECT id, totp_secret, totp_enabled FROM admin_users ORDER BY id LIMIT 1")
+    let row = sqlx::query("SELECT id, username, totp_secret, totp_enabled FROM admin_users ORDER BY id LIMIT 1")
         .fetch_optional(&state.pool)
         .await
         .map_err(internal_error)?
@@ -211,10 +217,29 @@ async fn confirm_totp(
         return Err(AuthError::response(StatusCode::CONFLICT, "TOTP 已启用"));
     }
     let user_id: i64 = row.get("id");
+    let username: String = row.get("username");
+    let since = (Utc::now() - ChronoDuration::minutes(15)).to_rfc3339();
+    let attempts: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM auth_login_attempts WHERE username = ? AND attempted_at > ?",
+    )
+    .bind(&username)
+    .bind(since)
+    .fetch_one(&state.pool)
+    .await
+    .map_err(internal_error)?;
+    if attempts >= 10 {
+        return Err(AuthError::response(StatusCode::TOO_MANY_REQUESTS, "验证码尝试次数过多，请 15 分钟后重试"));
+    }
     let secret: String = row.get("totp_secret");
     if !verify_totp(&secret, &input.code) {
+        record_login_failure(&state, &username).await?;
         return Err(AuthError::response(StatusCode::UNAUTHORIZED, "验证码无效或已过期"));
     }
+    sqlx::query("DELETE FROM auth_login_attempts WHERE username = ?")
+        .bind(&username)
+        .execute(&state.pool)
+        .await
+        .map_err(internal_error)?;
 
     let recovery_codes = generate_recovery_codes();
     let mut tx = state.pool.begin().await.map_err(internal_error)?;
@@ -469,7 +494,7 @@ fn verify_totp(secret: &str, supplied: &str) -> bool {
             | (u32::from(digest[index + 2]) << 8)
             | u32::from(digest[index + 3]))
             % 1_000_000;
-        format!("{number:06}").as_bytes().ct_eq(supplied.as_bytes()).into()
+        bool::from(format!("{number:06}").as_bytes().ct_eq(supplied.as_bytes()))
     })
 }
 
