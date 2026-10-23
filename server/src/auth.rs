@@ -343,7 +343,7 @@ async fn logout(
             .await
             .map_err(internal_error)?;
     }
-    let secure = if env::var("TUNNELHUB_COOKIE_SECURE").as_deref() == Ok("true") {
+    let secure = if env::var("TUNNELHUB_COOKIE_SECURE").as_deref() != Ok("false") {
         "; Secure"
     } else {
         ""
