@@ -45,8 +45,12 @@ struct AgentMessage {
 
 async fn handle_socket(socket: WebSocket) {
     let (mut sender, mut receiver) = socket.split();
-    let Some(Ok(Message::Text(first))) = receiver.next().await else {
-        return;
+    let first = match tokio::time::timeout(Duration::from_secs(10), receiver.next()).await {
+        Ok(Some(Ok(Message::Text(text)))) => text,
+        _ => {
+            let _ = sender.send(Message::Close(None)).await;
+            return;
+        }
     };
     let Ok(hello) = serde_json::from_str::<AgentMessage>(&first) else {
         let _ = sender.send(Message::Close(None)).await;
