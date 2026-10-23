@@ -74,6 +74,7 @@ function AccessControlPanel({ services }: { services: Service[] }) {
 
 function ServiceDashboard() {
   const [services, setServices] = useState<Service[]>([])
+  const [section, setSection] = useState('services')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
