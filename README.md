@@ -27,13 +27,13 @@ cd tunnelhub
 docker compose up -d --build
 ```
 
-默认管理界面地址为 http://localhost:8088，默认管理域名是 localhost。首次打开时创建管理员账户、设置密码并绑定 TOTP；后续登录必须同时提供密码和动态验证码。**管理域名仍建议保持本机访问，不要加入 FRP 公网映射**，因为当前没有多用户权限系统。FRP 只需把需要公开的业务服务域名转发到宿主机的 8088 端口。
+默认管理界面地址为 http://localhost:8088，默认管理域名是 localhost。首次打开时创建管理员账户、设置密码并绑定 TOTP；后续登录必须同时提供密码和动态验证码；无法使用验证器时，可用一次性恢复码登录。**管理域名仍建议保持本机访问，不要加入 FRP 公网映射**，因为当前没有多用户权限系统。FRP 只需把需要公开的业务服务域名转发到宿主机的 8088 端口。
 
 ## 管理员登录与 TOTP
 
 首次访问管理界面时，按页面提示创建唯一管理员账户（密码至少 12 个字符），然后用 Aegis、Google Authenticator 等兼容应用扫描二维码或手动输入密钥，并提交 6 位验证码确认绑定。成功后页面会展示 8 个一次性恢复码，请立即保存；每个恢复码只能使用一次。
 
-登录需要用户名、密码和 TOTP 验证码。会话使用 HttpOnly、SameSite=Strict Cookie，默认 8 小时过期；登录失败次数按用户名限流。管理员密码使用 Argon2id 哈希存储，恢复码只保存哈希。通过 HTTPS 访问管理界面时，在 `.env` 中设置 `TUNNELHUB_COOKIE_SECURE=true`，然后重建容器；仅本机 HTTP 访问时保持 `false`。
+登录需要用户名、密码和 TOTP 验证码，也可用一个未使用的恢复码替代 TOTP 验证码。会话使用 HttpOnly、SameSite=Strict Cookie，默认 8 小时过期；登录失败次数按用户名限流。管理员密码使用 Argon2id 哈希存储，恢复码只保存哈希。通过 HTTPS 访问管理界面时，在 `.env` 中设置 `TUNNELHUB_COOKIE_SECURE=true`，然后重建容器；仅本机 HTTP 访问时保持 `false`。
 
 认证表和服务配置保存在 Docker 命名卷 `tunnelhub_data` 中。请备份该卷；若丢失 TOTP 设备，可使用一次性恢复码登录。当前版本没有自助重置密码或多管理员功能。
 
