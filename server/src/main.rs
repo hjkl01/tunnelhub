@@ -64,6 +64,25 @@ async fn main() -> anyhow::Result<()> {
     .execute(&pool)
     .await?;
 
+    let service_columns: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('services')")
+        .fetch_all(&pool).await?;
+    if !service_columns.iter().any(|name| name == "access_mode") {
+        sqlx::query("ALTER TABLE services ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'public'")
+            .execute(&pool).await?;
+    }
+    sqlx::query("CREATE TABLE IF NOT EXISTS members (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)")
+        .execute(&pool).await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)")
+        .execute(&pool).await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS group_members (group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE, member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE, PRIMARY KEY (group_id, member_id))")
+        .execute(&pool).await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS service_acl (service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE, subject_type TEXT NOT NULL CHECK (subject_type IN ('user', 'group')), subject_id INTEGER NOT NULL, PRIMARY KEY (service_id, subject_type, subject_id))")
+        .execute(&pool).await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS member_sessions (token_hash TEXT PRIMARY KEY NOT NULL, member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)")
+        .execute(&pool).await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_member_sessions_expires_at ON member_sessions(expires_at)")
+        .execute(&pool).await?;
+
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::none())
@@ -72,6 +91,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/api/health", get(health))
         .nest("/api/auth", auth::router())
+        .nest("/api/access", access::router().route_layer(middleware::from_fn_with_state(state.clone(), auth::require_session)))
         .nest("/api/services", services::router().route_layer(middleware::from_fn_with_state(state.clone(), auth::require_session)))
         .fallback(proxy::handle)
         .with_state(state)
