@@ -20,6 +20,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
   if (!response.ok) {
+    if (response.status === 401) {
+      window.location.reload()
+    }
     const body = await response.json().catch(() => null)
     throw new Error(body?.error ?? `请求失败（${response.status}）`)
   }
