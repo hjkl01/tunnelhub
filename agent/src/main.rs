@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let agent_id = env::var("TUNNELHUB_AGENT_ID")
-        .unwrap_or_else(|_| hostname::get().ok().and_then(|name| name.into_string().ok()).unwrap_or_else(|| "tunnelhub-agent".to_string()));
+        .unwrap_or_else(|_| "tunnelhub-agent".to_string());
     let version = env!("CARGO_PKG_VERSION");
     let mut retry_delay = Duration::from_secs(1);
 
@@ -94,7 +94,6 @@ async fn connect_and_run(
                 sender.send(Message::Text(serde_json::json!({
                     "type": "heartbeat",
                     "agent_id": agent_id,
-                    "sent_at": chrono::Utc::now().to_rfc3339()
                 }).to_string().into())).await?;
             }
             message = receiver.next() => {
