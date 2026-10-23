@@ -64,7 +64,7 @@ pub fn router() -> Router<AppState> {
         .route("/access/users/{id}", axum::routing::put(update_user).delete(delete_user_account))
         .route("/access/groups", get(list_groups).post(create_group))
         .route("/access/groups/{id}", axum::routing::put(update_group).delete(delete_group))
-        .route("/access/groups/{id}/members", get(list_group_members))
+        
 }
 
 async fn list_services(State(state): State<AppState>) -> Result<Json<Vec<Service>>, (StatusCode, Json<ApiError>)> {
@@ -216,11 +216,21 @@ async fn delete_user_account(State(state): State<AppState>, Path(id): Path<i64>)
 }
 
 
-async fn list_groups(State(state): State<AppState>) -> Result<Json<Vec<AccessGroup>>, (StatusCode, Json<ApiError>)> {
-    let rows = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM groups ORDER BY name COLLATE NOCASE")
+#[derive(Debug, Serialize)]
+struct AccessGroupWithMembers { id: i64, name: String, created_at: String, members: Vec<i64> }
+
+async fn list_groups(State(state): State<AppState>) -> Result<Json<Vec<AccessGroupWithMembers>>, (StatusCode, Json<ApiError>)> {
+    let groups = sqlx::query_as::<_, AccessGroup>("SELECT id, name, created_at FROM groups ORDER BY name COLLATE NOCASE")
         .fetch_all(&state.pool).await.map_err(internal_error)?;
-    Ok(Json(rows))
+    let mut result = Vec::with_capacity(groups.len());
+    for group in groups {
+        let members = sqlx::query_scalar("SELECT member_id FROM group_members WHERE group_id = ? ORDER BY member_id")
+            .bind(group.id).fetch_all(&state.pool).await.map_err(internal_error)?;
+        result.push(AccessGroupWithMembers { id: group.id, name: group.name, created_at: group.created_at, members });
+    }
+    Ok(Json(result))
 }
+
 async fn create_group(State(state): State<AppState>, Json(input): Json<CreateAccessGroup>) -> Result<(StatusCode, Json<AccessGroup>), (StatusCode, Json<ApiError>)> {
     let name = input.name.trim();
     if name.is_empty() || name.len() > 100 { return Err((StatusCode::BAD_REQUEST, ApiError::new("用户组名称不能为空且不能超过 100 个字符"))); }
