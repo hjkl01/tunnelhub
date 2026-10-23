@@ -8,6 +8,7 @@ export default defineConfig({
       '/api': {
         target: process.env.TUNNELHUB_API_TARGET ?? 'http://127.0.0.1:8080',
         changeOrigin: true,
+        headers: { 'X-TunnelHub-Admin': '1' },
       },
     },
   },
