@@ -155,6 +155,65 @@ async fn fetch_by_id(state: &AppState, id: String) -> Result<Service, (StatusCod
     fetch_optional(state, &id).await?.ok_or_else(not_found)
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct AccessUser { id: i64, username: String, enabled: bool, created_at: String }
+#[derive(Debug, Deserialize)]
+struct CreateAccessUser { username: String, password: String }
+#[derive(Debug, Deserialize)]
+struct UpdateAccessUser { password: Option<String>, enabled: Option<bool> }
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct AccessGroup { id: i64, name: String, created_at: String }
+#[derive(Debug, Deserialize)]
+struct CreateAccessGroup { name: String }
+#[derive(Debug, Deserialize)]
+struct UpdateAccessGroup { name: Option<String>, members: Option<Vec<i64>> }
+#[derive(Debug, Deserialize)]
+struct UpdateServiceAcl { access_mode: String, users: Vec<i64>, groups: Vec<i64> }
+#[derive(Debug, Serialize)]
+struct ServiceAcl { access_mode: String, users: Vec<i64>, groups: Vec<i64> }
+
+async fn list_users(State(state): State<AppState>) -> Result<Json<Vec<AccessUser>>, (StatusCode, Json<ApiError>)> {
+    let rows = sqlx::query_as::<_, AccessUser>("SELECT id, username, enabled, created_at FROM members ORDER BY username COLLATE NOCASE")
+        .fetch_all(&state.pool).await.map_err(internal_error)?;
+    Ok(Json(rows))
+}
+async fn create_user(State(state): State<AppState>, Json(input): Json<CreateAccessUser>) -> Result<(StatusCode, Json<AccessUser>), (StatusCode, Json<ApiError>)> {
+    let username = input.username.trim();
+    if username.len() < 3 || username.len() > 64 { return Err((StatusCode::BAD_REQUEST, ApiError::new("用户名长度必须为 3 到 64 个字符"))); }
+    if input.password.len() < 12 || input.password.len() > 1024 { return Err((StatusCode::BAD_REQUEST, ApiError::new("密码长度必须为 12 到 1024 个字符"))); }
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default().hash_password(input.password.as_bytes(), &salt).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new("无法生成密码哈希")))?.to_string();
+    let result = sqlx::query("INSERT INTO members (username, password_hash, enabled, created_at) VALUES (?, ?, 1, ?)")
+        .bind(username).bind(hash).bind(Utc::now().to_rfc3339()).execute(&state.pool).await;
+    if let Err(e) = result { return Err(conflict_or_internal(e)); }
+    let row = sqlx::query_as::<_, AccessUser>("SELECT id, username, enabled, created_at FROM members WHERE username = ?")
+        .bind(username).fetch_one(&state.pool).await.map_err(internal_error)?;
+    Ok((StatusCode::CREATED, Json(row)))
+}
+async fn update_user(State(state): State<AppState>, Path(id): Path<i64>, Json(input): Json<UpdateAccessUser>) -> Result<Json<AccessUser>, (StatusCode, Json<ApiError>)> {
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM members WHERE id = ?").bind(id).fetch_one(&state.pool).await.map_err(internal_error)?;
+    if exists == 0 { return Err((StatusCode::NOT_FOUND, ApiError::new("用户不存在"))); }
+    if let Some(password) = input.password {
+        if password.len() < 12 || password.len() > 1024 { return Err((StatusCode::BAD_REQUEST, ApiError::new("密码长度必须为 12 到 1024 个字符"))); }
+        let salt = SaltString::generate(&mut OsRng);
+        let hash = Argon2::default().hash_password(password.as_bytes(), &salt).map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new("无法生成密码哈希")))?.to_string();
+        sqlx::query("UPDATE members SET password_hash = ? WHERE id = ?").bind(hash).bind(id).execute(&state.pool).await.map_err(internal_error)?;
+        sqlx::query("DELETE FROM member_sessions WHERE member_id = ?").bind(id).execute(&state.pool).await.map_err(internal_error)?;
+    }
+    if let Some(enabled) = input.enabled {
+        sqlx::query("UPDATE members SET enabled = ? WHERE id = ?").bind(enabled).bind(id).execute(&state.pool).await.map_err(internal_error)?;
+        if !enabled { sqlx::query("DELETE FROM member_sessions WHERE member_id = ?").bind(id).execute(&state.pool).await.map_err(internal_error)?; }
+    }
+    let row = sqlx::query_as::<_, AccessUser>("SELECT id, username, enabled, created_at FROM members WHERE id = ?").bind(id).fetch_one(&state.pool).await.map_err(internal_error)?;
+    Ok(Json(row))
+}
+async fn delete_user_account(State(state): State<AppState>, Path(id): Path<i64>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    let result = sqlx::query("DELETE FROM members WHERE id = ?").bind(id).execute(&state.pool).await.map_err(internal_error)?;
+    if result.rows_affected() == 0 { return Err((StatusCode::NOT_FOUND, ApiError::new("用户不存在"))); }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+
 fn required(value: String, field: &str) -> Result<String, (StatusCode, Json<ApiError>)> {
     let value = value.trim();
     if value.is_empty() {
