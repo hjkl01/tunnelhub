@@ -51,7 +51,7 @@ function AccessControlPanel({ services }: { services: Service[] }) {
     setAcls(Object.fromEntries(entries))
   }, [services])
   useEffect(() => { void load().catch(e => setMessage(String(e))) }, [load])
-  return <section className="page-content access-page">
+  return <section id="access-control" className="page-content access-page">
     <div className="page-heading"><div><div className="eyebrow">IDENTITY & ACCESS</div><h1>用户与权限</h1><p>创建用户和用户组，为每个服务配置访问授权。</p></div><button className="secondary-button" onClick={() => void load()}>刷新</button></div>
     {message && <div className="alert error-alert">{message}</div>}
     <section className="panel access-panel"><div className="panel-heading"><div><h2>用户账户</h2><p>业务服务登录用户，密码至少 12 位</p></div></div>
@@ -195,6 +195,7 @@ function ServiceDashboard() {
           </section>
           <div className="info-banner"><div className="info-symbol">i</div><div><strong>当前版本说明</strong><p>TunnelHub 只保存服务目录，不代理业务流量，也不会自动修改 FRP、DNS 或 Caddy。请单独配置 FRP 映射后再访问对应域名。</p></div></div>
         </section>
+        <AccessControlPanel services={services} />
       </main>
 
       {dialog && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setDialog(false) }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div className="modal-header"><div><h2 id="dialog-title">{editing ? '编辑服务' : '添加服务'}</h2><p>填写访问域名和容器可访问的目标地址</p></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="关闭"><X size={18} /></button></div><form onSubmit={save}><label>服务名称<input autoFocus required maxLength={200} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：Home Assistant" /></label><label>访问域名<input required value={draft.hostname} onChange={(e) => setDraft({ ...draft, hostname: e.target.value })} placeholder="ha.example.com" /><small>仅登记域名，不会自动修改 DNS 或代理配置。</small></label><label>目标 URL<input required type="url" value={draft.target_url} onChange={(e) => setDraft({ ...draft, target_url: e.target.value })} placeholder="http://host.docker.internal:8123" /><small>填写目标服务地址，必须包含 http:// 或 https://。容器访问宿主机时使用 host.docker.internal。</small></label><label className="checkbox-label"><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />启用此服务配置</label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>取消</button><button type="submit" className="primary-button" disabled={saving}>{saving ? '保存中…' : editing ? '保存修改' : '添加服务'}</button></div></form></section></div>}
