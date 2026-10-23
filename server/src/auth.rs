@@ -343,10 +343,18 @@ async fn logout(
             .await
             .map_err(internal_error)?;
     }
+    let secure = if env::var("TUNNELHUB_COOKIE_SECURE").as_deref() == Ok("true") {
+        "; Secure"
+    } else {
+        ""
+    };
+    let clear_cookie = format!(
+        "{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure}"
+    );
     let mut response_headers = HeaderMap::new();
     response_headers.insert(
         header::SET_COOKIE,
-        HeaderValue::from_static("tunnelhub_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0"),
+        clear_cookie.parse::<HeaderValue>().expect("static logout cookie is valid"),
     );
     Ok((response_headers, StatusCode::NO_CONTENT))
 }
