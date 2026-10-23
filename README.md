@@ -1,15 +1,21 @@
 # TunnelHub
 
-自托管服务目录与访问入口管理界面。TunnelHub 不实现内网穿透，也不安装、配置、启停或升级 FRP、Caddy。
+基于 FRP 的内网服务统一访问入口。FRP 负责公网与内网之间的隧道，TunnelHub 负责按 Host 域名把 HTTP 请求反向代理到宿主机或局域网内的目标服务。
 
-## 设计边界
+TunnelHub 不实现隧道协议，也不安装、配置、启停或升级 FRP、Caddy。
 
-- **FRP**：由部署者独立维护，负责公网与内网之间的网络穿透和端口/域名映射。
-- **TunnelHub**：管理服务名称、访问域名、目标 URL 和启停状态；不自动修改 FRP、Caddy、DNS 或宿主机网络配置。
-- **Docker**：TunnelHub 以容器方式运行，并通过 host.docker.internal 访问宿主机服务。
-- **SQLite**：存储服务配置，数据持久化到宿主机目录。
+## 请求链路
 
-服务配置中的目标地址是给管理员记录和查看的，不意味着 TunnelHub 会代理该流量。公网访问能否成功，取决于你单独配置的 FRP、DNS 和其他入口组件。
+```text
+公网用户
+  -> 你自行维护的 FRP 入口
+  -> TunnelHub 前端容器端口（默认宿主机 8088）
+  -> 按 Host 查询 SQLite 服务配置
+  -> 反向代理到目标 URL
+  -> 目标服务响应
+```
+
+FRP 应将服务域名的 HTTP 请求转发到 TunnelHub 的前端入口，并保留原始 Host 请求头。TLS 可以在你现有的公网入口终止；TunnelHub 容器入口当前接收 HTTP。TunnelHub 不会修改 FRP、DNS 或 Caddy 配置。
 
 ## Docker 部署
 
@@ -21,19 +27,32 @@ cd tunnelhub
 docker compose up -d --build
 ```
 
-打开 http://localhost:8088。
+默认管理界面地址为 http://localhost:8088。默认管理域名是 localhost；正式部署时，在 .env 中设置你用于管理界面的域名：
 
-默认 SQLite 数据保存在当前目录的 ./data/。可在 .env 中设置 TUNNELHUB_PORT，修改宿主机映射端口。
+```dotenv
+TUNNELHUB_UI_HOST=dashboard.example.com
+TUNNELHUB_PORT=8088
+```
 
-### 从容器访问宿主机服务
+然后重新创建容器：
 
-添加服务时，目标 URL 使用容器能够解析和访问的地址。例如：
+```bash
+docker compose up -d --build
+```
+
+将 dashboard.example.com 的流量通过你自己的 FRP 入口转发到 TunnelHub。其他 Host 域名会进入服务反向代理。管理界面/API 尚未提供用户登录认证，不要将管理域名暴露给不可信用户。
+
+## 添加服务
+
+在管理界面填写服务名称、访问域名和目标 URL。目标 URL 是 TunnelHub 容器需要访问的地址，例如：
 
 - 宿主机上的 Web 应用：http://host.docker.internal:3000
 - 宿主机上的 Home Assistant：http://host.docker.internal:8123
 - 局域网另一台机器：http://192.168.1.20:8080
 
-Compose 已配置 Linux Docker 的 host.docker.internal:host-gateway 映射。请确认宿主机服务监听的地址允许 Docker 网桥访问；只监听宿主机 127.0.0.1 的服务通常无法直接从容器访问，应调整该服务的监听地址或采用适当的宿主机网络方案。
+保存后，访问域名必须与请求中的 Host 一致。你还需要自行配置 DNS 和 FRP，让该域名的 HTTP 流量进入 TunnelHub 入口。服务启用状态控制 TunnelHub 是否接受该域名的代理请求；它不会修改 FRP 配置。
+
+Compose 已为 Linux Docker 配置 host.docker.internal:host-gateway。目标服务必须监听可从 Docker 网桥到达的接口；只监听宿主机 127.0.0.1 的服务通常无法直接从 bridge 网络容器访问。
 
 ## 本地开发
 
@@ -49,8 +68,11 @@ make build
 - API：http://127.0.0.1:8080
 - 健康检查：GET /api/health
 
-可以通过 TUNNELHUB_LISTEN 设置 API 监听地址，通过 TUNNELHUB_DATABASE_URL 指定 SQLite 文件。
+本地开发时，Vite 会为管理 API 请求添加内部标记。可通过 TUNNELHUB_LISTEN 设置 API 监听地址，通过 TUNNELHUB_DATABASE_URL 指定 SQLite 文件。
 
 ## 当前限制
 
-当前提供服务配置 CRUD 和基础管理界面。管理员认证、访问日志和与 FRP 的自动化集成均未实现；TunnelHub 不会替你配置或验证 FRP 的实际转发。不要将未认证的管理界面直接暴露到不可信公网。
+- 已实现服务配置 CRUD 和按 Host 匹配的 HTTP 反向代理，支持流式请求/响应体。
+- 管理员认证、访问日志和 FRP 自动化集成未实现。
+- 当前代理不跟随上游 HTTP 重定向；若目标服务返回重定向，由客户端按 Location 处理。
+- WebSocket 代理、自动 HTTPS 证书、自动 DNS/FRP 配置尚未实现。
