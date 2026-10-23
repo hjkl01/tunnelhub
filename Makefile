@@ -14,9 +14,7 @@ dev-server: ## 仅启动后端开发服务器
 dev-frontend: ## 仅启动前端开发服务器
 	cd frontend && npm run dev
 
-build: ## 构建后端和前端
-
-build: build-server build-frontend
+build: build-server build-frontend ## 构建后端和前端
 
 build-server: ## 构建 Rust 后端 release 版本
 	cargo build --release -p tunnelhub-server
