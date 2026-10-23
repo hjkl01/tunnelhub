@@ -6,7 +6,6 @@ use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
 use axum::{
     extract::{Request, State},
-    http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
