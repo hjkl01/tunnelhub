@@ -72,9 +72,9 @@ async fn main() -> anyhow::Result<()> {
     }
     sqlx::query("CREATE TABLE IF NOT EXISTS members (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)")
         .execute(&pool).await?;
-    sqlx::query("CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)")
+    sqlx::query("CREATE TABLE IF NOT EXISTS user_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)")
         .execute(&pool).await?;
-    sqlx::query("CREATE TABLE IF NOT EXISTS group_members (group_id INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE, member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE, PRIMARY KEY (group_id, member_id))")
+    sqlx::query("CREATE TABLE IF NOT EXISTS group_members (group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE, member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE, PRIMARY KEY (group_id, member_id))")
         .execute(&pool).await?;
     sqlx::query("CREATE TABLE IF NOT EXISTS service_acl (service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE, subject_type TEXT NOT NULL CHECK (subject_type IN ('user', 'group')), subject_id INTEGER NOT NULL, PRIMARY KEY (service_id, subject_type, subject_id))")
         .execute(&pool).await?;
