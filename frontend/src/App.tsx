@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Activity, ArrowUpRight, CircleHelp, Globe2, LayoutDashboard, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, Waypoints, X } from 'lucide-react'
+import { Activity, ArrowUpRight, CircleHelp, Globe2, LayoutDashboard, LogOut, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, Waypoints, X } from 'lucide-react'
 
 type Service = {
   id: string
@@ -26,7 +26,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export default function App() {
+function ServiceDashboard() {
   const [services, setServices] = useState<Service[]>([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -127,7 +127,7 @@ export default function App() {
       </aside>
 
       <main className="main">
-        <header className="topbar"><div className="breadcrumbs">工作空间 <span>/</span> <strong>服务管理</strong></div><button className="icon-button" title="关于 TunnelHub" onClick={() => setNotice('TunnelHub：统一管理内网服务访问入口。底层 Caddy、FRP 由你自行管理。')}><CircleHelp size={18} /></button></header>
+        <header className="topbar"><div className="breadcrumbs">工作空间 <span>/</span> <strong>服务管理</strong></div><div className="topbar-actions"><button className="icon-button" title="关于 TunnelHub" onClick={() => setNotice('TunnelHub：统一管理内网服务访问入口。底层 Caddy、FRP 由你自行管理。')}><CircleHelp size={18} /></button><button className="logout-button" onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.reload() }}><LogOut size={15} />退出登录</button></div></header>
         <section className="page-content">
           <div className="page-heading"><div><div className="eyebrow">NETWORK CONTROL PLANE</div><h1>服务管理</h1><p>统一登记服务地址与访问域名；公网映射由你自行配置 FRP。</p></div><button className="primary-button" onClick={openCreate}><Plus size={17} />添加服务</button></div>
 
@@ -152,5 +152,150 @@ export default function App() {
 
       {dialog && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setDialog(false) }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div className="modal-header"><div><h2 id="dialog-title">{editing ? '编辑服务' : '添加服务'}</h2><p>填写访问域名和容器可访问的目标地址</p></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="关闭"><X size={18} /></button></div><form onSubmit={save}><label>服务名称<input autoFocus required maxLength={200} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：Home Assistant" /></label><label>访问域名<input required value={draft.hostname} onChange={(e) => setDraft({ ...draft, hostname: e.target.value })} placeholder="ha.example.com" /><small>仅登记域名，不会自动修改 DNS 或代理配置。</small></label><label>目标 URL<input required type="url" value={draft.target_url} onChange={(e) => setDraft({ ...draft, target_url: e.target.value })} placeholder="http://host.docker.internal:8123" /><small>填写目标服务地址，必须包含 http:// 或 https://。容器访问宿主机时使用 host.docker.internal。</small></label><label className="checkbox-label"><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />启用此服务配置</label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>取消</button><button type="submit" className="primary-button" disabled={saving}>{saving ? '保存中…' : editing ? '保存修改' : '添加服务'}</button></div></form></section></div>}
     </div>
+  )
+}
+
+
+type AuthStatus = { setup_required: boolean; authenticated: boolean; totp_pending: boolean }
+type TotpSetup = { secret: string; otpauth_uri: string }
+type RecoveryResponse = { recovery_codes: string[] }
+
+async function authRequest<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: 'same-origin',
+  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null)
+    throw new Error(payload?.error ?? `请求失败（${response.status}）`)
+  }
+  if (response.status === 204) return undefined as T
+  return response.json() as Promise<T>
+}
+
+export default function App() {
+  const [status, setStatus] = useState<AuthStatus | null>(null)
+  const [setupInfo, setSetupInfo] = useState<TotpSetup | null>(null)
+  const [view, setView] = useState<'loading' | 'setup' | 'totp' | 'login' | 'recovery' | 'authenticated'>('loading')
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const refreshAuth = useCallback(async () => {
+    try {
+      const current = await authRequest<AuthStatus>('/api/auth/status')
+      setStatus(current)
+      if (current.authenticated) {
+        setView('authenticated')
+      } else if (current.setup_required) {
+        setView('setup')
+      } else if (current.totp_pending) {
+        const info = await authRequest<TotpSetup>('/api/auth/totp/pending')
+        setSetupInfo(info)
+        setView('totp')
+      } else {
+        setView('login')
+      }
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : '无法检查登录状态')
+      setView('login')
+    }
+  }, [])
+
+  useEffect(() => { void refreshAuth() }, [refreshAuth])
+
+  async function submitSetup(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true); setAuthError('')
+    try {
+      const info = await authRequest<TotpSetup>('/api/auth/setup', { username, password })
+      setSetupInfo(info)
+      setView('totp')
+      setCode('')
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : '初始化管理员失败')
+    } finally { setBusy(false) }
+  }
+
+  async function submitTotp(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true); setAuthError('')
+    try {
+      const result = await authRequest<RecoveryResponse>('/api/auth/totp/confirm', { code })
+      setRecoveryCodes(result.recovery_codes)
+      setView('recovery')
+      setCode('')
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : 'TOTP 验证失败')
+    } finally { setBusy(false) }
+  }
+
+  async function submitLogin(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true); setAuthError('')
+    try {
+      await authRequest('/api/auth/login', { username, password, code })
+      setStatus({ setup_required: false, authenticated: true, totp_pending: false })
+      setView('authenticated')
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : '登录失败')
+    } finally { setBusy(false) }
+  }
+
+  if (view === 'loading') return <div className="auth-loading">正在检查登录状态…</div>
+  if (view === 'authenticated') return <ServiceDashboard />
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="auth-brand"><div className="brand-mark"><Waypoints size={21} /></div><span>Tunnel<span className="brand-light">Hub</span></span></div>
+        {authError && <div className="alert error-alert auth-error">{authError}</div>}
+        {view === 'setup' && <>
+          <div className="auth-eyebrow">FIRST-TIME SETUP</div>
+          <h1>初始化管理员</h1>
+          <p className="auth-description">创建唯一管理员账户。密码至少 12 个字符，随后必须绑定 TOTP 才能使用管理界面。</p>
+          <form className="auth-form" onSubmit={submitSetup}>
+            <label>管理员用户名<input autoComplete="username" required minLength={3} maxLength={64} value={username} onChange={e => setUsername(e.target.value)} /></label>
+            <label>管理员密码<input type="password" autoComplete="new-password" required minLength={12} value={password} onChange={e => setPassword(e.target.value)} /></label>
+            <button className="primary-button auth-submit" disabled={busy}>{busy ? '正在初始化…' : '创建管理员并设置 TOTP'}</button>
+          </form>
+        </>}
+        {view === 'totp' && setupInfo && <>
+          <div className="auth-eyebrow">TWO-FACTOR AUTHENTICATION</div>
+          <h1>绑定验证器</h1>
+          <p className="auth-description">在 Aegis、Google Authenticator 或其他兼容应用中添加账户。可扫描 URI（若你的验证器支持）或手动输入密钥。</p>
+          <div className="totp-secret"><span>密钥</span><code>{setupInfo.secret}</code><button type="button" className="secondary-button" onClick={() => void navigator.clipboard?.writeText(setupInfo.secret)}>复制密钥</button></div>
+          <details className="otpauth-details"><summary>显示 otpauth URI</summary><code>{setupInfo.otpauth_uri}</code></details>
+          <form className="auth-form" onSubmit={submitTotp}>
+            <label>6 位动态验证码<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} /></label>
+            <button className="primary-button auth-submit" disabled={busy}>{busy ? '正在验证…' : '确认绑定并启用 TOTP'}</button>
+          </form>
+        </>}
+        {view === 'login' && <>
+          <div className="auth-eyebrow">SECURE ADMIN ACCESS</div>
+          <h1>管理员登录</h1>
+          <p className="auth-description">使用管理员密码和验证器中的 6 位动态验证码登录。</p>
+          <form className="auth-form" onSubmit={submitLogin}>
+            <label>用户名<input autoComplete="username" required value={username} onChange={e => setUsername(e.target.value)} /></label>
+            <label>密码<input type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} /></label>
+            <label>动态验证码或恢复码<input autoComplete="one-time-code" required value={code} onChange={e => setCode(e.target.value.trim().slice(0, 32))} placeholder="6 位验证码 / 恢复码" /></label>
+            <button className="primary-button auth-submit" disabled={busy}>{busy ? '正在登录…' : '登录'}</button>
+          </form>
+        </>}
+        {view === 'recovery' && <>
+          <div className="auth-eyebrow">SAVE THESE CODES</div>
+          <h1>保存恢复码</h1>
+          <p className="auth-description">以下恢复码每个只能使用一次。请立即保存到密码管理器或其他安全位置；离开此页后不会再次显示。</p>
+          <div className="recovery-grid">{recoveryCodes.map(item => <code key={item}>{item}</code>)}</div>
+          <button className="primary-button auth-submit" onClick={() => { setRecoveryCodes([]); setView('authenticated') }}>我已安全保存，进入管理界面</button>
+        </>}
+        <div className="auth-footer">会话有效期 8 小时 · TOTP 动态验证码每 30 秒更新</div>
+      </section>
+    </main>
   )
 }
