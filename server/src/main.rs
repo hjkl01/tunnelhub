@@ -7,7 +7,7 @@ use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 use axum::{
     extract::{Request, State},
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::get,
     Router,
 };
