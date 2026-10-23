@@ -177,7 +177,6 @@ async function authRequest<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export default function App() {
-  const [status, setStatus] = useState<AuthStatus | null>(null)
   const [setupInfo, setSetupInfo] = useState<TotpSetup | null>(null)
   const [view, setView] = useState<'loading' | 'setup' | 'totp' | 'login' | 'recovery' | 'authenticated'>('loading')
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
@@ -190,7 +189,6 @@ export default function App() {
   const refreshAuth = useCallback(async () => {
     try {
       const current = await authRequest<AuthStatus>('/api/auth/status')
-      setStatus(current)
       if (current.authenticated) {
         setView('authenticated')
       } else if (current.setup_required) {
@@ -241,7 +239,6 @@ export default function App() {
     setBusy(true); setAuthError('')
     try {
       await authRequest('/api/auth/login', { username, password, code })
-      setStatus({ setup_required: false, authenticated: true, totp_pending: false })
       setView('authenticated')
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : '登录失败')
