@@ -1,3 +1,4 @@
+mod auth;
 mod proxy;
 mod services;
 mod state;
@@ -36,6 +37,19 @@ async fn main() -> anyhow::Result<()> {
         .connect_with(options)
         .await?;
 
+    sqlx::query("CREATE TABLE IF NOT EXISTS admin_users (id INTEGER PRIMARY KEY CHECK (id = 1), username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, totp_secret TEXT NOT NULL, totp_enabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)")
+        .execute(&pool)
+        .await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY NOT NULL, user_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)")
+        .execute(&pool)
+        .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
+        .execute(&pool)
+        .await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS recovery_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, code_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, used_at TEXT)")
+        .execute(&pool)
+        .await?;
+
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS services (
             id TEXT PRIMARY KEY NOT NULL,
@@ -57,7 +71,8 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState { pool, client };
     let app = Router::new()
         .route("/api/health", get(health))
-        .nest("/api/services", services::router().route_layer(middleware::from_fn_with_state(state.clone(), require_admin_api)))
+        .nest("/api/auth", auth::router())
+        .nest("/api/services", services::router().route_layer(middleware::from_fn_with_state(state.clone(), auth::require_session)))
         .fallback(proxy::handle)
         .with_state(state)
         .layer(TraceLayer::new_for_http());
