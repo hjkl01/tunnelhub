@@ -59,7 +59,7 @@ make check
 make build
 ```
 
-- 管理界面：http://127.0.0.1:5173
+- 管理界面：http://localhost:5173
 - API：http://127.0.0.1:8080
 - 健康检查：GET /api/health
 
