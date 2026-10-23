@@ -491,25 +491,49 @@ fn verify_totp(secret: &str, supplied: &str) -> bool {
     if supplied.len() != 6 || !supplied.bytes().all(|byte| byte.is_ascii_digit()) {
         return false;
     }
-    let Ok(key) = base32::decode(Alphabet::RFC4648 { padding: false }, secret) else {
-        return false;
-    };
     let step = Utc::now().timestamp().div_euclid(30);
     (-1_i64..=1).any(|offset| {
-        let counter = (step + offset) as u64;
-        let Ok(mut mac) = HmacSha1::new_from_slice(&key) else {
+        let Some(expected) = totp_code_for_counter(secret, (step + offset) as u64) else {
             return false;
         };
-        mac.update(&counter.to_be_bytes());
-        let digest = mac.finalize().into_bytes();
-        let index = (digest[digest.len() - 1] & 0x0f) as usize;
-        let number = ((u32::from(digest[index] & 0x7f) << 24)
-            | (u32::from(digest[index + 1]) << 16)
-            | (u32::from(digest[index + 2]) << 8)
-            | u32::from(digest[index + 3]))
-            % 1_000_000;
-        bool::from(format!("{number:06}").as_bytes().ct_eq(supplied.as_bytes()))
+        bool::from(expected.as_bytes().ct_eq(supplied.as_bytes()))
     })
+}
+
+fn totp_code_for_counter(secret: &str, counter: u64) -> Option<String> {
+    let key = base32::decode(Alphabet::RFC4648 { padding: false }, secret)?;
+    let mut mac = HmacSha1::new_from_slice(&key).ok()?;
+    mac.update(&counter.to_be_bytes());
+    let digest = mac.finalize().into_bytes();
+    let index = (digest[digest.len() - 1] & 0x0f) as usize;
+    let number = ((u32::from(digest[index] & 0x7f) << 24)
+        | (u32::from(digest[index + 1]) << 16)
+        | (u32::from(digest[index + 2]) << 8)
+        | u32::from(digest[index + 3]))
+        % 1_000_000;
+    Some(format!("{number:06}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{generate_secret, totp_code_for_counter};
+    use base32::Alphabet;
+
+    #[test]
+    fn totp_matches_rfc_6238_sha1_six_digit_vector() {
+        let secret = base32::encode(
+            Alphabet::RFC4648 { padding: false },
+            b"12345678901234567890",
+        );
+        assert_eq!(totp_code_for_counter(&secret, 1).as_deref(), Some("287082"));
+    }
+
+    #[test]
+    fn generated_totp_secret_contains_twenty_random_bytes() {
+        let secret = generate_secret();
+        let decoded = base32::decode(Alphabet::RFC4648 { padding: false }, &secret).unwrap();
+        assert_eq!(decoded.len(), 20);
+    }
 }
 
 fn generate_recovery_codes() -> Vec<String> {
