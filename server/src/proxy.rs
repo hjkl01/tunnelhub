@@ -83,10 +83,19 @@ async fn member_login(state: &AppState, request: Request<Body>, service_id: &str
         Ok(value) => value,
         Err(_) => return plain(StatusCode::BAD_REQUEST, "登录请求格式无效"),
     };
+    let username = input.username.trim();
+    let since = (Utc::now() - ChronoDuration::minutes(15)).to_rfc3339();
+    let attempts: i64 = match sqlx::query_scalar("SELECT COUNT(*) FROM member_login_attempts WHERE username = ? AND attempted_at > ?")
+        .bind(username).bind(since).fetch_one(&state.pool).await {
+        Ok(value) => value,
+        Err(error) => { tracing::error!(?error, "读取登录失败记录失败"); return plain(StatusCode::INTERNAL_SERVER_ERROR, "登录失败"); }
+    };
+    if attempts >= 10 { return plain(StatusCode::TOO_MANY_REQUESTS, "登录失败次数过多，请 15 分钟后重试"); }
     let row = match sqlx::query("SELECT id, password_hash FROM members WHERE username = ? AND enabled = 1")
-        .bind(input.username.trim()).fetch_optional(&state.pool).await {
+        .bind(username).fetch_optional(&state.pool).await {
         Ok(Some(value)) => value,
         Ok(None) => {
+            record_member_failure(state, username).await;
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             return plain(StatusCode::UNAUTHORIZED, "用户名或密码错误");
         }
@@ -101,9 +110,11 @@ async fn member_login(state: &AppState, request: Request<Body>, service_id: &str
         Err(_) => return plain(StatusCode::INTERNAL_SERVER_ERROR, "用户凭据数据损坏"),
     };
     if Argon2::default().verify_password(input.password.as_bytes(), &parsed).is_err() {
+        record_member_failure(state, username).await;
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         return plain(StatusCode::UNAUTHORIZED, "用户名或密码错误");
     }
+    sqlx::query("DELETE FROM member_login_attempts WHERE username = ?").bind(username).execute(&state.pool).await.ok();
     let member_id: i64 = row.get("id");
     let allowed = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM service_acl a WHERE a.service_id = ? AND ((a.subject_type = 'user' AND a.subject_id = ?) OR (a.subject_type = 'group' AND a.subject_id IN (SELECT group_id FROM group_members WHERE member_id = ?)))",
@@ -140,6 +151,16 @@ async fn member_login(state: &AppState, request: Request<Body>, service_id: &str
         response.headers_mut().insert(axum::http::header::SET_COOKIE, value);
     }
     response
+}
+
+
+async fn record_member_failure(state: &AppState, username: &str) {
+    if let Err(error) = sqlx::query("INSERT INTO member_login_attempts (username, attempted_at) VALUES (?, ?)")
+        .bind(username).bind(Utc::now().to_rfc3339()).execute(&state.pool).await {
+        tracing::warn!(?error, "记录业务用户登录失败次数失败");
+    }
+    let cutoff = (Utc::now() - ChronoDuration::hours(24)).to_rfc3339();
+    let _ = sqlx::query("DELETE FROM member_login_attempts WHERE attempted_at < ?").bind(cutoff).execute(&state.pool).await;
 }
 
 async fn member_from_request(state: &AppState, headers: &HeaderMap) -> Option<i64> {
