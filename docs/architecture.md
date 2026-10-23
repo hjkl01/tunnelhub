@@ -5,7 +5,7 @@
 - **FRP**：由部署者自行部署和维护，负责公网与内网之间的隧道和流量送达。
 - **TunnelHub Server**：管理服务配置；根据请求 Host 查询启用的服务，并将 HTTP 请求反向代理到目标 URL。
 - **Frontend / Nginx**：在管理域名提供静态管理界面与 API 入口；其他 Host 转发到 Server 的动态服务路由。
-- **SQLite**：保存服务名称、Host、目标 URL 和启用状态。
+- **SQLite**：保存服务配置、管理员凭据与会话、业务用户、用户组、组成员关系、服务 ACL 和业务用户会话。
 - **Docker**：容器化运行；通过 host.docker.internal 访问宿主机服务。
 
 TunnelHub 不安装、配置、启停或升级 FRP、Caddy，也不会自动更改 DNS、FRP 配置或宿主机防火墙。
@@ -28,7 +28,10 @@ TunnelHub 只处理 HTTP 代理流量，不建立隧道，不控制 FRP。当前
 
 - 管理域名 API 通过 Nginx 注入内部标记；服务配置 API 还必须验证有效会话，不能将该标记当作身份认证。
 - 管理员首次初始化后必须绑定 TOTP；登录同时校验 Argon2id 密码哈希与 TOTP 或一次性恢复码。
-- 会话 Cookie 使用 HttpOnly、SameSite=Strict，8 小时过期；HTTPS 部署应设置 `TUNNELHUB_COOKIE_SECURE=true`。
-- 登录失败按用户名限流。当前为单管理员模型，没有多用户和权限分级；管理界面仍建议只在可信网络访问。
+- 业务用户由管理员创建，密码使用 Argon2id 哈希存储。每个受限服务在其自身 Host 下提供登录页，并以 HttpOnly Cookie 建立业务访问会话。
+- 服务访问模式为 `public` 或 `restricted`。公开服务不要求登录；受限服务必须匹配直接用户授权或所属用户组授权，没有匹配授权时拒绝访问。
+- 用户禁用或重置密码时会撤销其业务会话；服务 ACL 通过服务 ID 关联，删除服务时自动清理。
+- 会话 Cookie 使用 HttpOnly、SameSite=Strict，8 小时过期；默认 `TUNNELHUB_COOKIE_SECURE=true`。只有在纯 HTTP 且明确需要时才设置为 `false`。
+- 登录失败按用户名限流。管理后台仍为单管理员模型；业务用户与组 ACL 用于限制业务服务访问，管理界面仍建议只在可信网络访问。
 - 目标 URL 可访问宿主机和局域网服务，因此仅允许可信管理员管理服务配置，避免滥用为 SSRF 或内网探测入口。
 - FRP、Caddy、DNS、TLS 证书和宿主机防火墙均由部署者单独管理。
