@@ -100,6 +100,10 @@ async fn require_admin_api(State(state): State<AppState>, request: Request, next
         .and_then(|value| value.to_str().ok())
         == Some("1");
     if !trusted {
+        let mut request = request;
+        if let Some(original_uri) = request.extensions().get::<axum::extract::OriginalUri>() {
+            *request.uri_mut() = original_uri.0.clone();
+        }
         return proxy::handle(State(state), request).await;
     }
     next.run(request).await
