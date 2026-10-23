@@ -30,6 +30,48 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+
+type AccessUser = { id: number; username: string; enabled: boolean }
+type AccessGroup = { id: number; name: string; members: number[] }
+type ServiceAcl = { access_mode: 'public' | 'restricted'; users: number[]; groups: number[] }
+
+function AccessControlPanel({ services }: { services: Service[] }) {
+  const [users, setUsers] = useState<AccessUser[]>([])
+  const [groups, setGroups] = useState<AccessGroup[]>([])
+  const [acls, setAcls] = useState<Record<string, ServiceAcl>>({})
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [groupName, setGroupName] = useState('')
+  const [message, setMessage] = useState('')
+  const load = useCallback(async () => {
+    const u = await api<AccessUser[]>('/api/services/access/users')
+    const g = await api<AccessGroup[]>('/api/services/access/groups')
+    setUsers(u); setGroups(g)
+    const entries = await Promise.all(services.map(async s => [s.id, await api<ServiceAcl>('/api/services/' + s.id + '/acl')] as const))
+    setAcls(Object.fromEntries(entries))
+  }, [services])
+  useEffect(() => { void load().catch(e => setMessage(String(e))) }, [load])
+  return <section className="page-content access-page">
+    <div className="page-heading"><div><div className="eyebrow">IDENTITY & ACCESS</div><h1>用户与权限</h1><p>创建用户和用户组，为每个服务配置访问授权。</p></div><button className="secondary-button" onClick={() => void load()}>刷新</button></div>
+    {message && <div className="alert error-alert">{message}</div>}
+    <section className="panel access-panel"><div className="panel-heading"><div><h2>用户账户</h2><p>业务服务登录用户，密码至少 12 位</p></div></div>
+      <form className="inline-create" onSubmit={async e => { e.preventDefault(); try { await api('/api/services/access/users', { method: 'POST', body: JSON.stringify({ username, password }) }); setUsername(''); setPassword(''); setMessage('用户已创建'); await load() } catch (err) { setMessage(String(err)) } }}>
+        <input required minLength={3} value={username} onChange={e => setUsername(e.target.value)} placeholder="用户名" />
+        <input required minLength={12} type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="初始密码" />
+        <button className="primary-button">创建用户</button>
+      </form>
+      {users.map(u => <div className="access-row" key={u.id}><strong>{u.username}</strong><span>{u.enabled ? '已启用' : '已禁用'}</span><button className="secondary-button" onClick={async () => { await api('/api/services/access/users/' + u.id, { method: 'PUT', body: JSON.stringify({ enabled: !u.enabled }) }); await load() }}>{u.enabled ? '禁用' : '启用'}</button></div>)}
+    </section>
+    <section className="panel access-panel"><div className="panel-heading"><div><h2>用户组</h2><p>用户组可以被授予服务访问权限</p></div></div>
+      <form className="inline-create" onSubmit={async e => { e.preventDefault(); await api('/api/services/access/groups', { method: 'POST', body: JSON.stringify({ name: groupName }) }); setGroupName(''); await load() }}><input required value={groupName} onChange={e => setGroupName(e.target.value)} placeholder="用户组名称" /><button className="primary-button">新建组</button></form>
+      {groups.map(g => <details className="group-item" key={g.id}><summary>{g.name}（{g.members.length} 人）</summary>{users.map(u => <label key={u.id}><input type="checkbox" checked={g.members.includes(u.id)} onChange={e => setGroups(old => old.map(x => x.id === g.id ? { ...x, members: e.target.checked ? [...x.members, u.id] : x.members.filter(id => id !== u.id) } : x))} />{u.username}</label>)}<button className="secondary-button" onClick={async () => { await api('/api/services/access/groups/' + g.id, { method: 'PUT', body: JSON.stringify({ members: g.members }) }); await load() }}>保存成员</button></details>)}
+    </section>
+    <section className="panel service-acl-panel"><div className="panel-heading"><div><h2>服务访问授权</h2><p>受限模式只允许指定用户和用户组访问。</p></div></div>
+      {services.map(s => { const a = acls[s.id] || { access_mode: s.access_mode || 'public', users: [], groups: [] }; return <article className="service-acl-card" key={s.id}><div className="service-acl-title"><strong>{s.name}（{s.hostname}）</strong><select value={a.access_mode} onChange={e => setAcls(old => ({ ...old, [s.id]: { ...a, access_mode: e.target.value as ServiceAcl['access_mode'] } }))}><option value="public">公开</option><option value="restricted">仅授权用户/组</option></select></div>{a.access_mode === 'restricted' && <div className="acl-subjects"><div><strong>用户</strong>{users.map(u => <label key={u.id}><input type="checkbox" checked={a.users.includes(u.id)} onChange={e => setAcls(old => ({ ...old, [s.id]: { ...a, users: e.target.checked ? [...a.users, u.id] : a.users.filter(id => id !== u.id) } }))} />{u.username}</label>)}</div><div><strong>用户组</strong>{groups.map(g => <label key={g.id}><input type="checkbox" checked={a.groups.includes(g.id)} onChange={e => setAcls(old => ({ ...old, [s.id]: { ...a, groups: e.target.checked ? [...a.groups, g.id] : a.groups.filter(id => id !== g.id) } }))} />{g.name}</label>)}</div></div>}<button className="primary-button" onClick={async () => { await api('/api/services/' + s.id + '/acl', { method: 'PUT', body: JSON.stringify(a) }); await load(); setMessage('授权已保存') }}>保存授权</button></article> })}
+    </section>
+  </section>
+}
+
 function ServiceDashboard() {
   const [services, setServices] = useState<Service[]>([])
   const [query, setQuery] = useState('')
