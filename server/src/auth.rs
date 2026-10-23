@@ -98,7 +98,9 @@ async fn require_admin_host(request: Request, next: Next) -> Response {
     if !allowed {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let is_write = !matches!(*request.method(), axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS);
+    let is_write = request.method() != axum::http::Method::GET
+        && request.method() != axum::http::Method::HEAD
+        && request.method() != axum::http::Method::OPTIONS;
     if is_write
         && (!request.headers().contains_key(header::ORIGIN) || !same_origin(request.headers()))
     {
