@@ -55,11 +55,16 @@ make build
 服务端和 Agent 必须设置相同的共享令牌，且至少 24 个字符：
 
 ```bash
-export TUNNELHUB_AGENT_TOKEN='请替换为长度至少24位的随机令牌'
-# 终端一：启动 Server
+# 生成一个随机令牌，并在 Server 和 Agent 两个终端中设置相同的值
+export TUNNELHUB_AGENT_TOKEN="$(openssl rand -hex 32)"
+# 终端一：启动 Server（先在此终端生成并保留令牌）
 make dev-server
-# 终端二：启动 Agent
-TUNNELHUB_SERVER_URL=http://127.0.0.1:8080 TUNNELHUB_AGENT_ID=home-node make dev-agent
+
+# 终端二：复制终端一生成的同一个令牌，再启动 Agent
+export TUNNELHUB_AGENT_TOKEN='粘贴同一个随机令牌'
+export TUNNELHUB_SERVER_URL=http://127.0.0.1:8080
+export TUNNELHUB_AGENT_ID=home-node
+make dev-agent
 ```
 
 Agent 通过 `/api/agent/connect` 建立 WebSocket 连接，每 15 秒发送心跳；连接断开后采用指数退避重连。当前是开发阶段的共享令牌认证，不具备逐节点凭证管理，也尚未传输实际 HTTP 请求。生产部署前必须使用 HTTPS/WSS，并补齐管理员认证、逐节点授权和目标地址访问限制。
