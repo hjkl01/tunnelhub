@@ -10,6 +10,7 @@ type Service = {
   enabled: boolean
   created_at: string
   updated_at: string
+  access_mode: string
 }
 type Draft = { name: string; hostname: string; target_url: string; enabled: boolean }
 const emptyDraft: Draft = { name: '', hostname: '', target_url: 'http://host.docker.internal:3000', enabled: true }
