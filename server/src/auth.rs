@@ -38,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .route("/totp/confirm", post(confirm_totp))
         .route("/login", post(login))
         .route("/logout", post(logout))
+        .route_layer(axum::middleware::from_fn(require_admin_host))
 }
 
 #[derive(Deserialize)]
@@ -85,6 +86,19 @@ impl AuthError {
     fn response(status: StatusCode, message: &'static str) -> (StatusCode, Json<Self>) {
         (status, Json(Self { error: message.to_string() }))
     }
+}
+
+
+async fn require_admin_host(request: Request, next: Next) -> Response {
+    let allowed = request
+        .headers()
+        .get("x-tunnelhub-admin")
+        .and_then(|value| value.to_str().ok())
+        == Some("1");
+    if !allowed {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    next.run(request).await
 }
 
 async fn status(
