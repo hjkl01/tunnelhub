@@ -10,11 +10,8 @@ services:
       TUNNELHUB_COOKIE_SECURE: ${TUNNELHUB_COOKIE_SECURE:-true}
       TUNNELHUB_UI_HOST: ${TUNNELHUB_UI_HOST:-localhost}
     volumes:
-      - tunnelhub_data:/data
+      - ./data/tunnelhub_data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${TUNNELHUB_PORT:-8088}:8080"
-
-volumes:
-  tunnelhub_data:
