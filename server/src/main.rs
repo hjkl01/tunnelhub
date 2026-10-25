@@ -111,7 +111,7 @@ async fn main() -> anyhow::Result<()> {
 
     // In container mode Caddy is the public HTTP entry point. Rust remains bound
     // to loopback and owns the API, embedded frontend, and forward-auth checks.
-    let _caddy_child = if caddy_enabled {
+    let mut caddy_child = if caddy_enabled {
         let binary = env::var("TUNNELHUB_CADDY_BIN").unwrap_or_else(|_| "caddy".to_string());
         let caddy_listen = env::var("TUNNELHUB_CADDY_LISTEN")
             .unwrap_or_else(|_| "0.0.0.0:8080".to_string());
@@ -125,7 +125,16 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address, caddy_enabled, "TunnelHub API listening");
-    axum::serve(listener, app).await?;
+    if let Some(child) = caddy_child.as_mut() {
+        tokio::select! {
+            result = axum::serve(listener, app) => result?,
+            status = child.wait() => {
+                return Err(anyhow::anyhow!("Caddy exited unexpectedly: {:?}", status?));
+            }
+        }
+    } else {
+        axum::serve(listener, app).await?;
+    }
     Ok(())
 }
 
