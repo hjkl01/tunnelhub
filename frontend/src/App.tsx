@@ -12,8 +12,8 @@ type Service = {
   updated_at: string
   access_mode: string
 }
-type Draft = { name: string; hostname: string; target_url: string; enabled: boolean }
-const emptyDraft: Draft = { name: '', hostname: '', target_url: 'http://host.docker.internal:3000', enabled: true }
+type Draft = { name: string; target_url: string; enabled: boolean }
+const emptyDraft: Draft = { name: '', target_url: 'http://host.docker.internal:3000', enabled: true }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -76,6 +76,7 @@ function AccessControlPanel({ services }: { services: Service[] }) {
 function ServiceDashboard() {
   const [services, setServices] = useState<Service[]>([])
   const [section, setSection] = useState('services')
+  const [selectedService, setSelectedService] = useState<Service | null>(null)
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -112,7 +113,7 @@ function ServiceDashboard() {
   }
   function openEdit(service: Service) {
     setEditing(service)
-    setDraft({ name: service.name, hostname: service.hostname, target_url: service.target_url, enabled: service.enabled })
+    setDraft({ name: service.name, target_url: service.target_url, enabled: service.enabled })
     setDialog(true)
   }
   async function save(event: React.FormEvent) {
