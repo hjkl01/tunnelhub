@@ -54,7 +54,7 @@ docker compose up -d --build
 - 宿主机上的 Home Assistant：http://host.docker.internal:8123
 - 局域网另一台机器：http://192.168.1.20:8080
 
-保存后，服务通过同源路径 `/proxy/{service_id}/` 访问，并可在管理页面的内嵌视图中打开。启用服务后，Caddy 会自动同步对应的代理路由；停用或删除服务后路由也会同步更新。
+保存前可点击“测试 HTTP 连通性”，由 TunnelHub 后端在 5 秒内尝试请求目标地址，并显示 HTTP 状态码、最终 URL 和 Content-Type。返回 4xx/5xx 仍表示 HTTP 服务有响应，但不代表应用业务正常。若检测失败，请先确认目标地址、端口、容器网络和服务监听地址。保存后，服务通过同源路径 `/proxy/{service_id}/` 访问，并可在管理页面的内嵌视图中打开。启用服务后，Caddy 会自动同步对应的代理路由；停用或删除服务后路由也会同步更新。
 
 Compose 已为 Linux Docker 配置 host.docker.internal:host-gateway。目标服务必须监听可从 Docker 网桥到达的接口；只监听宿主机 127.0.0.1 的服务通常无法直接从 bridge 网络容器访问。
 
