@@ -12,3 +12,5 @@
 @media(max-width:900px){.access-columns{grid-template-columns:1fr}.inline-create{flex-wrap:wrap}.acl-subjects{grid-template-columns:1fr}}
 
 a.nav-item{text-decoration:none;color:inherit}.access-page{scroll-margin-top:20px}
+
+.embedded-viewer{margin-bottom:24px;overflow:hidden}.embedded-viewer .panel-heading{gap:12px}.embedded-viewer iframe{display:block;width:100%;height:min(72vh,900px);min-height:420px;border:0;border-top:1px solid #e7e9ef;background:#fff}.embedded-viewer .panel-heading p{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
