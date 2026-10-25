@@ -72,8 +72,8 @@ pub async fn start(
 }
 
 async fn render_config(pool: &SqlitePool, listen: &str) -> anyhow::Result<String> {
-    let rows = sqlx::query_as::<_, (String, String, String, i64)>(
-        "SELECT id, target_url, access_mode, enabled FROM services ORDER BY id",
+    let rows = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT id, target_url, enabled FROM services ORDER BY id",
     )
     .fetch_all(pool)
     .await?;
@@ -83,7 +83,7 @@ async fn render_config(pool: &SqlitePool, listen: &str) -> anyhow::Result<String
         caddy_quote(listen)
     );
 
-    for (id, target, access_mode, enabled) in rows {
+    for (id, target, enabled) in rows {
         if enabled == 0 {
             continue;
         }
@@ -99,11 +99,11 @@ async fn render_config(pool: &SqlitePool, listen: &str) -> anyhow::Result<String
         config.push_str(&format!(
             "        handle_path {prefix}/* {{\n"
         ));
-        if access_mode == "restricted" {
-            config.push_str(&format!(
-                "            forward_auth 127.0.0.1:8081 {{\n                uri /_internal/proxy-auth/{id}\n            }}\n"
-            ));
-        }
+        // Always authorize at request time so ACL changes take effect immediately,
+        // without waiting for a Caddy configuration reload.
+        config.push_str(&format!(
+            "            forward_auth 127.0.0.1:8081 {{\n                uri /_internal/proxy-auth/{id}\n            }}\n"
+        ));
         if !base_path.is_empty() {
             config.push_str(&format!(
                 "            rewrite * {}{{uri}}\n",
