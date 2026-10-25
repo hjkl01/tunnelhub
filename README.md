@@ -80,5 +80,5 @@ make build
 - 管理后台支持管理员密码 + TOTP、一次性恢复码和会话校验；业务访问支持用户、用户组和按服务授权。
 - 受限服务由 Caddy 在每次请求时调用 Rust forward-auth 检查用户会话和 ACL；登录会话使用同源 Cookie。
 - 业务用户目前使用密码登录，尚未支持业务用户 TOTP、细粒度读写权限或访问日志。
-- 当前代理不跟随上游 HTTP 重定向；若目标服务返回重定向，由客户端按 Location 处理。
-- Caddy 自动同步服务路由；容器入口仍为 HTTP，TLS/FRP/DNS 由部署者按需配置。\n- 路径代理会尝试重写根路径重定向和 Cookie Path，但目标应用若硬编码绝对资源路径/域名，或通过 CSP、X-Frame-Options 禁止 iframe，仍可能需要单独调整应用配置。
+- Caddy 自动同步服务路由；容器入口仍为 HTTP，TLS/FRP/DNS 由部署者按需配置。
+- 代理会尝试重写部分根路径重定向和 Cookie Path，但目标应用若硬编码绝对资源路径/域名，或通过 CSP、X-Frame-Options 禁止 iframe，仍可能需要单独调整应用配置。
