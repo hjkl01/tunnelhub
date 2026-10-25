@@ -29,7 +29,7 @@ pub struct Service {
 #[derive(Debug, Deserialize)]
 pub struct CreateService {
     pub name: String,
-    pub hostname: String,
+    pub hostname: Option<String>,
     pub target_url: String,
     pub enabled: Option<bool>,
     pub access_mode: Option<String>,
@@ -97,10 +97,14 @@ async fn create_service(
     Json(input): Json<CreateService>,
 ) -> Result<(StatusCode, Json<Service>), (StatusCode, Json<ApiError>)> {
     let name = required(input.name, "name")?;
-    let hostname = normalize_hostname(&input.hostname)?;
+    // hostname is retained only for legacy Host-based routes. New services use a stable internal hostname.
     let target_url = validate_target(&input.target_url)?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let id = Uuid::new_v4().to_string();
+    let hostname = match input.hostname.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => normalize_hostname(value)?,
+        None => format!("service-{}.tunnelhub.internal", id.replace('-', "")),
+    };
     let enabled = input.enabled.unwrap_or(true);
     let access_mode = validate_access_mode(input.access_mode.as_deref().unwrap_or("public"))?;
 
@@ -119,7 +123,7 @@ async fn update_service(
 ) -> Result<Json<Service>, (StatusCode, Json<ApiError>)> {
     let current = fetch_optional(&state, &id).await?.ok_or_else(not_found)?;
     let name = match input.name { Some(value) => required(value, "name")?, None => current.name };
-    let hostname = match input.hostname { Some(value) => normalize_hostname(&value)?, None => current.hostname };
+    let hostname = match input.hostname.as_deref().map(str::trim).filter(|value| !value.is_empty()) { Some(value) => normalize_hostname(value)?, None => current.hostname };
     let target_url = match input.target_url { Some(value) => validate_target(&value)?, None => current.target_url };
     let enabled = input.enabled.unwrap_or(current.enabled);
     let access_mode = validate_access_mode(input.access_mode.as_deref().unwrap_or(&current.access_mode))?;
@@ -353,7 +357,7 @@ fn internal_error(error: sqlx::Error) -> (StatusCode, Json<ApiError>) {
 fn conflict_or_internal(error: sqlx::Error) -> (StatusCode, Json<ApiError>) {
     if let sqlx::Error::Database(database_error) = &error {
         if database_error.is_unique_violation() {
-            return (StatusCode::CONFLICT, ApiError::new("该 hostname 已被使用"));
+            return (StatusCode::CONFLICT, ApiError::new("该访问主机名已被使用"));
         }
     }
     internal_error(error)
