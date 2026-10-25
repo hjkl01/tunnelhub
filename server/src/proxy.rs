@@ -21,6 +21,55 @@ use crate::state::AppState;
 #[folder = "../frontend/dist/"]
 struct FrontendAssets;
 
+pub async fn authorize_proxy(
+    State(state): State<AppState>,
+    axum::extract::Path(service_id): axum::extract::Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let service = sqlx::query_as::<_, (String, String)>(
+        "SELECT access_mode, target_url FROM services WHERE id = ? AND enabled = 1",
+    )
+    .bind(&service_id)
+    .fetch_optional(&state.pool)
+    .await;
+    let (access_mode, _target) = match service {
+        Ok(Some(value)) => value,
+        Ok(None) => return plain(StatusCode::NOT_FOUND, "服务不存在或已停用"),
+        Err(error) => {
+            tracing::error!(?error, "Caddy 代理授权检查失败");
+            return plain(StatusCode::INTERNAL_SERVER_ERROR, "授权检查失败");
+        }
+    };
+    if access_mode == "public" {
+        return plain(StatusCode::OK, "ok");
+    }
+
+    let Some(member_id) = member_from_request(&state, &headers).await else {
+        let mut response = Response::new(Body::empty());
+        *response.status_mut() = StatusCode::FOUND;
+        if let Ok(location) = HeaderValue::from_str(&format!("/proxy/{service_id}/.tunnelhub/login")) {
+            response.headers_mut().insert(axum::http::header::LOCATION, location);
+        }
+        return response;
+    };
+    let allowed = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM service_acl a WHERE a.service_id = ? AND ((a.subject_type = 'user' AND a.subject_id = ?) OR (a.subject_type = 'group' AND a.subject_id IN (SELECT group_id FROM group_members WHERE member_id = ?)))",
+    )
+    .bind(&service_id)
+    .bind(member_id)
+    .bind(member_id)
+    .fetch_one(&state.pool)
+    .await;
+    match allowed {
+        Ok(count) if count > 0 => plain(StatusCode::OK, "ok"),
+        Ok(_) => plain(StatusCode::FORBIDDEN, "你的账户没有访问此服务的权限"),
+        Err(error) => {
+            tracing::error!(?error, "读取服务 ACL 失败");
+            plain(StatusCode::INTERNAL_SERVER_ERROR, "授权检查失败")
+        }
+    }
+}
+
 pub async fn handle(State(state): State<AppState>, request: Request<Body>) -> Response {
     if let Some((service_id, service_path)) = embedded_service_path(request.uri().path()) {
         return handle_embedded_service(&state, request, &service_id, &service_path).await;
