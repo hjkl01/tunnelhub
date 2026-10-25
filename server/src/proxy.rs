@@ -26,13 +26,13 @@ pub async fn authorize_proxy(
     axum::extract::Path(service_id): axum::extract::Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let service = sqlx::query_as::<_, (String, String)>(
-        "SELECT access_mode, target_url FROM services WHERE id = ? AND enabled = 1",
+    let service = sqlx::query_scalar::<_, String>(
+        "SELECT access_mode FROM services WHERE id = ? AND enabled = 1",
     )
     .bind(&service_id)
     .fetch_optional(&state.pool)
     .await;
-    let (access_mode, _target) = match service {
+    let access_mode = match service {
         Ok(Some(value)) => value,
         Ok(None) => return plain(StatusCode::NOT_FOUND, "服务不存在或已停用"),
         Err(error) => {
@@ -515,6 +515,19 @@ fn plain(status: StatusCode, message: &'static str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::normalize_request_host;
+
+    #[test]
+    fn parses_embedded_service_path() {
+        assert_eq!(
+            super::embedded_service_path("/proxy/abc-123/assets/app.js"),
+            Some(("abc-123".to_string(), "/assets/app.js".to_string()))
+        );
+        assert_eq!(
+            super::embedded_service_path("/proxy/abc-123"),
+            Some(("abc-123".to_string(), "/".to_string()))
+        );
+        assert_eq!(super::embedded_service_path("/proxy/"), None);
+    }
 
     #[test]
     fn normalizes_host_case_and_port() {
