@@ -20,17 +20,9 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 RUN cargo build --release -p tunnelhub-server
 
 FROM ${DOCKER_MIRROR}/library/debian:bookworm-slim
-# Debian 软件源切换到清华镜像；同时兼容传统 sources.list 与 deb822 配置
+# 复用 Rust 构建镜像中的 CA 证书，避免运行阶段依赖 APT 软件源
+COPY --from=rust-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 RUN set -eux; \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-      sed -i 's|https\?://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g; s|https\?://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
-    fi; \
-    if [ -f /etc/apt/sources.list ]; then \
-      sed -i 's|https\?://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g; s|https\?://security.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list; \
-    fi; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates; \
-    rm -rf /var/lib/apt/lists/*; \
     useradd --system --uid 10001 --create-home tunnelhub; \
     mkdir -p /data; \
     chown -R tunnelhub:tunnelhub /data
