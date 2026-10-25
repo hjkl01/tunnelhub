@@ -111,7 +111,7 @@ async fn render_config(pool: &SqlitePool, listen: &str) -> anyhow::Result<String
             ));
         }
         config.push_str(&format!(
-            "            reverse_proxy {scheme}://{dial} {{\n                header_up X-Forwarded-Prefix {prefix}\n                header_down Location ^/(.*)$ {prefix}/$1\n                header_down Set-Cookie \"Path=/\" \"Path={prefix}/\"\n            }}\n        }}\n"
+            "            reverse_proxy {scheme}://{dial} {{\n                header_up X-Forwarded-Prefix {prefix}\n                header_down Location *^/(.*)$ {prefix}/$1\n                header_down Set-Cookie \"Path=/\" \"Path={prefix}/\"\n            }}\n        }}\n"
         ));
     }
 
