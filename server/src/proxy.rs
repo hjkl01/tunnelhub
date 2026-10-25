@@ -22,6 +22,9 @@ use crate::state::AppState;
 struct FrontendAssets;
 
 pub async fn handle(State(state): State<AppState>, request: Request<Body>) -> Response {
+    if let Some((service_id, service_path)) = embedded_service_path(request.uri().path()) {
+        return handle_embedded_service(&state, request, &service_id, &service_path).await;
+    }
     let Some(host) = request.headers().get(HOST).and_then(|value| value.to_str().ok())
         .map(normalize_request_host).filter(|value| !value.is_empty()) else {
         return plain(StatusCode::BAD_REQUEST, "缺少有效的 Host 请求头");
@@ -54,7 +57,7 @@ pub async fn handle(State(state): State<AppState>, request: Request<Body>) -> Re
         let Some(member_id) = member_id else {
             if request.headers().get("accept").and_then(|v| v.to_str().ok()).unwrap_or("").contains("text/html")
                 && request.method() == axum::http::Method::GET {
-                return login_page();
+                return login_page_at("/.tunnelhub/login");
             }
             return plain(StatusCode::UNAUTHORIZED, "该服务需要登录后访问");
         };
@@ -71,6 +74,82 @@ pub async fn handle(State(state): State<AppState>, request: Request<Body>) -> Re
         }
     }
     forward(&state, request, &target).await
+}
+
+fn embedded_service_path(path: &str) -> Option<(String, String)> {
+    let rest = path.strip_prefix("/proxy/")?;
+    let (id, suffix) = match rest.split_once('/') {
+        Some((id, suffix)) => (id, format!("/{}", suffix)),
+        None => (rest, "/".to_string()),
+    };
+    if id.is_empty() || id.contains('/') || id == "." || id == ".." {
+        return None;
+    }
+    Some((id.to_string(), suffix))
+}
+
+async fn handle_embedded_service(
+    state: &AppState,
+    request: Request<Body>,
+    service_id: &str,
+    service_path: &str,
+) -> Response {
+    let service = sqlx::query_as::<_, (String, String)>(
+        "SELECT target_url, access_mode FROM services WHERE id = ? AND enabled = 1",
+    )
+    .bind(service_id)
+    .fetch_optional(&state.pool)
+    .await;
+    let (target, access_mode) = match service {
+        Ok(Some(value)) => value,
+        Ok(None) => return plain(StatusCode::NOT_FOUND, "服务不存在或已停用"),
+        Err(error) => {
+            tracing::error!(?error, "读取嵌入式服务配置失败");
+            return plain(StatusCode::INTERNAL_SERVER_ERROR, "读取服务配置失败");
+        }
+    };
+
+    if service_path == "/.tunnelhub/login" && request.method() == axum::http::Method::POST {
+        return member_login(state, request, service_id, &access_mode).await;
+    }
+
+    if access_mode == "restricted" {
+        let member_id = member_from_request(state, request.headers()).await;
+        let Some(member_id) = member_id else {
+            if request.headers().get("accept").and_then(|v| v.to_str().ok()).unwrap_or("").contains("text/html")
+                && request.method() == axum::http::Method::GET {
+                return login_page_at(&format!("/proxy/{service_id}/.tunnelhub/login"));
+            }
+            return plain(StatusCode::UNAUTHORIZED, "该服务需要登录后访问");
+        };
+        let allowed = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM service_acl a WHERE a.service_id = ? AND ((a.subject_type = 'user' AND a.subject_id = ?) OR (a.subject_type = 'group' AND a.subject_id IN (SELECT group_id FROM group_members WHERE member_id = ?)))",
+        )
+        .bind(service_id)
+        .bind(member_id)
+        .bind(member_id)
+        .fetch_one(&state.pool)
+        .await;
+        match allowed {
+            Ok(count) if count > 0 => {}
+            Ok(_) => return plain(StatusCode::FORBIDDEN, "你的账户没有访问此服务的权限"),
+            Err(error) => {
+                tracing::error!(?error, "检查嵌入式服务访问权限失败");
+                return plain(StatusCode::INTERNAL_SERVER_ERROR, "检查服务访问权限失败");
+            }
+        }
+    }
+
+    let (mut parts, body) = request.into_parts();
+    let path_and_query = match parts.uri.query() {
+        Some(query) => format!("{service_path}?{query}"),
+        None => service_path.to_string(),
+    };
+    parts.uri = match path_and_query.parse() {
+        Ok(uri) => uri,
+        Err(_) => return plain(StatusCode::BAD_REQUEST, "请求路径无效"),
+    };
+    forward(state, Request::from_parts(parts, body), &target).await
 }
 
 #[derive(Deserialize)]
@@ -186,8 +265,8 @@ async fn member_from_request(state: &AppState, headers: &HeaderMap) -> Option<i6
     ).bind(token_hash).bind(Utc::now().to_rfc3339()).fetch_optional(&state.pool).await.ok().flatten()
 }
 
-fn login_page() -> Response {
-    let html = r#"<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务访问验证</title><style>body{font:15px system-ui;background:#f5f6f8;display:grid;place-items:center;min-height:100vh;margin:0;color:#20283a}.card{width:min(360px,calc(100% - 48px));padding:28px;background:white;border:1px solid #e4e7ed;border-radius:12px;box-shadow:0 18px 50px #1720330d}h1{font-size:22px;margin:0 0 8px}p{color:#778196;font-size:13px;line-height:1.6}label{display:block;font-size:12px;margin:16px 0 6px}input{box-sizing:border-box;width:100%;height:40px;border:1px solid #d9dee8;border-radius:6px;padding:0 10px}button{width:100%;margin-top:20px;height:42px;background:#29344b;color:white;border:0;border-radius:6px;font-weight:600}#error{color:#b4232f}</style><div class="card"><h1>需要授权访问</h1><p>登录 TunnelHub 账户以继续访问此服务。</p><form id="form"><label>用户名</label><input name="username" autocomplete="username" required><label>密码</label><input name="password" type="password" autocomplete="current-password" required><button>登录并继续</button><p id="error"></p></form></div><script>document.querySelector('#form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);const r=await fetch('/.tunnelhub/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:f.get('username'),password:f.get('password'),return_to:location.pathname+location.search})});if(r.ok){const d=await r.json();location.replace(d.return_to||'/')}else{document.querySelector('#error').textContent=(await r.text())||'登录失败'}})</script></html>"#;
+fn login_page_at(login_endpoint: &str) -> Response {
+    let html = r#"<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>服务访问验证</title><style>body{font:15px system-ui;background:#f5f6f8;display:grid;place-items:center;min-height:100vh;margin:0;color:#20283a}.card{width:min(360px,calc(100% - 48px));padding:28px;background:white;border:1px solid #e4e7ed;border-radius:12px;box-shadow:0 18px 50px #1720330d}h1{font-size:22px;margin:0 0 8px}p{color:#778196;font-size:13px;line-height:1.6}label{display:block;font-size:12px;margin:16px 0 6px}input{box-sizing:border-box;width:100%;height:40px;border:1px solid #d9dee8;border-radius:6px;padding:0 10px}button{width:100%;margin-top:20px;height:42px;background:#29344b;color:white;border:0;border-radius:6px;font-weight:600}#error{color:#b4232f}</style><div class="card"><h1>需要授权访问</h1><p>登录 TunnelHub 账户以继续访问此服务。</p><form id="form"><label>用户名</label><input name="username" autocomplete="username" required><label>密码</label><input name="password" type="password" autocomplete="current-password" required><button>登录并继续</button><p id="error"></p></form></div><script>document.querySelector('#form').addEventListener('submit',async e=>{e.preventDefault();const f=new FormData(e.target);const r=await fetch('${login_endpoint}',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:f.get('username'),password:f.get('password'),return_to:location.pathname+location.search})});if(r.ok){const d=await r.json();location.replace(d.return_to||'/')}else{document.querySelector('#error').textContent=(await r.text())||'登录失败'}})</script></html>"#;
     let mut response = Response::new(Body::from(html));
     response.headers_mut().insert(axum::http::header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
     response
