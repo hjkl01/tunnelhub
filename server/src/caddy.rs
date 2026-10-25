@@ -88,9 +88,14 @@ async fn render_config(pool: &SqlitePool, listen: &str) -> anyhow::Result<String
     .fetch_all(pool)
     .await?;
 
+    // Use an explicit HTTP scheme. A bare site address can be subject to
+    // Caddy's automatic HTTPS behavior depending on how the address is parsed.
+    // TunnelHub terminates HTTP here; TLS should be provided by an external proxy.
+    let listen = listen.strip_prefix("http://").unwrap_or(listen);
+    let site_address = format!("http://{listen}");
     let mut config = format!(
         "{{\n    admin 127.0.0.1:2019\n    auto_https off\n}}\n\n{} {{\n    route {{\n        @internal path /_internal/*\n        respond @internal \"Not Found\" 404\n",
-        caddy_quote(listen)
+        caddy_quote(&site_address)
     );
 
     for (id, target, enabled) in rows {
