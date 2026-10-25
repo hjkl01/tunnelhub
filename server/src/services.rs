@@ -2,7 +2,7 @@ use argon2::{password_hash::{PasswordHasher, SaltString}, Argon2};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use chrono::{SecondsFormat, Utc};
@@ -55,8 +55,22 @@ impl ApiError {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct TestTargetInput {
+    target_url: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TestTargetResult {
+    reachable: bool,
+    status: u16,
+    final_url: String,
+    content_type: Option<String>,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/test-target", post(test_target))
         .route("/", get(list_services).post(create_service))
         .route("/{id}", get(get_service).put(update_service).delete(delete_service))
         .route("/{id}/acl", get(get_acl).put(update_acl))
@@ -65,6 +79,42 @@ pub fn router() -> Router<AppState> {
         .route("/access/groups", get(list_groups).post(create_group))
         .route("/access/groups/{id}", axum::routing::put(update_group).delete(delete_group))
         
+}
+
+async fn test_target(
+    Json(input): Json<TestTargetInput>,
+) -> Result<Json<TestTargetResult>, (StatusCode, Json<ApiError>)> {
+    let target_url = validate_target(&input.target_url)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|error| {
+            tracing::error!(?error, "创建 HTTP 连通性检测客户端失败");
+            (StatusCode::INTERNAL_SERVER_ERROR, ApiError::new("无法初始化 HTTP 检测客户端"))
+        })?;
+    let response = client.get(&target_url).send().await.map_err(|error| {
+        tracing::warn!(target_url = %target_url, ?error, "目标服务 HTTP 连通性检测失败");
+        (
+            StatusCode::BAD_GATEWAY,
+            ApiError::new(format!("TunnelHub 无法通过 HTTP 访问目标服务：{error}")),
+        )
+    })?;
+
+    let status = response.status().as_u16();
+    let final_url = response.url().to_string();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+
+    Ok(Json(TestTargetResult {
+        reachable: true,
+        status,
+        final_url,
+        content_type,
+    }))
 }
 
 async fn list_services(State(state): State<AppState>) -> Result<Json<Vec<Service>>, (StatusCode, Json<ApiError>)> {
