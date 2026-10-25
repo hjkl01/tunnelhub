@@ -134,7 +134,7 @@ fn upstream_parts(value: &str) -> anyhow::Result<Option<(String, String, String)
 }
 
 fn caddy_quote(value: &str) -> String {
-    format!("\\\"{}\\\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(test)]
@@ -151,6 +151,6 @@ mod tests {
 
     #[test]
     fn quotes_caddyfile_strings() {
-        assert_eq!(caddy_quote("hello"), "\\"hello\\"");
+        assert_eq!(caddy_quote("hello"), "\"hello\"");
     }
 }
