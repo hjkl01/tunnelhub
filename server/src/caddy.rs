@@ -62,8 +62,18 @@ pub async fn start(
                     applied = desired;
                     info!("Caddy 代理配置已同步");
                 }
-                Ok(status) => warn!(?status, "Caddy 拒绝新配置；将重试"),
-                Err(error) => warn!(?error, "无法重载 Caddy；将重试"),
+                Ok(status) => {
+                    warn!(?status, "Caddy 拒绝新配置；恢复旧配置并重试");
+                    if let Err(error) = tokio::fs::write(&sync_path, &applied).await {
+                        warn!(?error, "无法恢复上一次有效的 Caddy 配置");
+                    }
+                }
+                Err(error) => {
+                    warn!(?error, "无法重载 Caddy；恢复旧配置并重试");
+                    if let Err(write_error) = tokio::fs::write(&sync_path, &applied).await {
+                        warn!(?write_error, "无法恢复上一次有效的 Caddy 配置");
+                    }
+                }
             }
         }
     });
