@@ -149,7 +149,53 @@ async fn handle_embedded_service(
         Ok(uri) => uri,
         Err(_) => return plain(StatusCode::BAD_REQUEST, "请求路径无效"),
     };
-    forward(state, Request::from_parts(parts, body), &target).await
+    let response = forward(state, Request::from_parts(parts, body), &target).await;
+    rewrite_embedded_response(response, service_id, &target)
+}
+
+fn rewrite_embedded_response(mut response: Response, service_id: &str, target: &str) -> Response {
+    if let Some(location) = response.headers().get(axum::http::header::LOCATION).and_then(|v| v.to_str().ok()).map(str::to_string) {
+        if let Ok(base) = Url::parse(target) {
+            if let Ok(resolved) = base.join(&location) {
+                if resolved.origin() == base.origin() {
+                    let mut path = format!("/proxy/{service_id}{}", resolved.path());
+                    if let Some(query) = resolved.query() {
+                        path.push('?');
+                        path.push_str(query);
+                    }
+                    if let Some(fragment) = resolved.fragment() {
+                        path.push('#');
+                        path.push_str(fragment);
+                    }
+                    if let Ok(value) = HeaderValue::from_str(&path) {
+                        response.headers_mut().insert(axum::http::header::LOCATION, value);
+                    }
+                }
+            }
+        }
+    }
+
+    let cookies: Vec<String> = response.headers().get_all(axum::http::header::SET_COOKIE)
+        .iter().filter_map(|value| value.to_str().ok().map(str::to_string)).collect();
+    if !cookies.is_empty() {
+        response.headers_mut().remove(axum::http::header::SET_COOKIE);
+        for cookie in cookies {
+            let rewritten = if cookie.to_ascii_lowercase().contains("path=") {
+                cookie.split(';').map(|part| {
+                    let trimmed = part.trim();
+                    if trimmed.to_ascii_lowercase().starts_with("path=") {
+                        format!(" Path=/proxy/{service_id}{}", trimmed.trim_start_matches("Path=").trim_start_matches("path="))
+                    } else { part.to_string() }
+                }).collect::<Vec<_>>().join(";")
+            } else {
+                format!("{cookie}; Path=/proxy/{service_id}/")
+            };
+            if let Ok(value) = HeaderValue::from_str(&rewritten) {
+                response.headers_mut().append(axum::http::header::SET_COOKIE, value);
+            }
+        }
+    }
+    response
 }
 
 #[derive(Deserialize)]
