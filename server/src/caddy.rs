@@ -107,7 +107,7 @@ async fn render_config(pool: &SqlitePool, listen: &str) -> anyhow::Result<String
         if !base_path.is_empty() {
             config.push_str(&format!(
                 "            rewrite * {}{{uri}}\n",
-                caddy_quote(&base_path)
+                base_path
             ));
         }
         config.push_str(&format!(
