@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
         .connect_timeout(Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    let state = AppState { pool, client };
+    let state = AppState { pool: pool.clone(), client };
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/_internal/proxy-auth/{id}", get(proxy::authorize_proxy))
