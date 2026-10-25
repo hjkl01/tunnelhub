@@ -103,7 +103,7 @@ function ServiceDashboard() {
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     if (!needle) return services
-    return services.filter((item) => [item.name, item.hostname, item.target_url].some((value) => value.toLowerCase().includes(needle)))
+    return services.filter((item) => [item.name, item.target_url].some((value) => value.toLowerCase().includes(needle)))
   }, [services, query])
 
   function openCreate() {
@@ -167,7 +167,7 @@ function ServiceDashboard() {
         <div className="workspace-label">工作空间</div>
         <button className={section === "services" ? "nav-item active" : "nav-item"} onClick={() => setSection("services")}><LayoutDashboard size={18} />服务管理</button>
         <a className="nav-item" href="#access-control"><ShieldCheck size={18} />用户与权限</a>
-        <button className="nav-item" onClick={() => setNotice('FRP 和 Caddy 由你自行部署与管理，TunnelHub 不会修改其配置。')}><Activity size={18} />网络组件 <span className="soon">外部管理</span></button>
+        <button className="nav-item" onClick={() => setNotice('Caddy 负责服务转发，FRP 仍由你自行配置。')}><Activity size={18} />网络组件 <span className="soon">外部管理</span></button>
         <button className="nav-item" onClick={() => setNotice('访问日志将在后续版本开放')}><ShieldCheck size={18} />访问日志 <span className="soon">即将推出</span></button>
         <div className="sidebar-bottom">
           <div className="connection-card"><span className="status-dot" /><div><strong>管理 API</strong><small>通过本地 API 连接</small></div></div>
@@ -177,7 +177,7 @@ function ServiceDashboard() {
       </aside>
 
       <main className="main">
-        <header className="topbar"><div className="breadcrumbs">工作空间 <span>/</span> <strong>服务管理</strong></div><div className="topbar-actions"><button className="icon-button" title="关于 TunnelHub" onClick={() => setNotice('TunnelHub：统一管理内网服务访问入口。底层 Caddy、FRP 由你自行管理。')}><CircleHelp size={18} /></button><button className="logout-button" onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.reload() }}><LogOut size={15} />退出登录</button></div></header>
+        <header className="topbar"><div className="breadcrumbs">工作空间 <span>/</span> <strong>服务管理</strong></div><div className="topbar-actions"><button className="icon-button" title="关于 TunnelHub" onClick={() => setNotice('TunnelHub：统一管理内网服务，并在页面内嵌访问目标服务。')}><CircleHelp size={18} /></button><button className="logout-button" onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.reload() }}><LogOut size={15} />退出登录</button></div></header>
         <section className="page-content">
           {selectedService && <section className="panel embedded-viewer"><div className="panel-heading"><div><h2>{selectedService.name}</h2><p>/proxy/{selectedService.id}/</p></div><button className="secondary-button" onClick={() => setSelectedService(null)}>关闭视图</button></div><iframe title={selectedService.name} src={`/proxy/${selectedService.id}/`} /></section>}
           <div className="page-heading"><div><div className="eyebrow">NETWORK CONTROL PLANE</div><h1>服务管理</h1><p>统一登记服务地址与访问域名；公网映射由你自行配置 FRP。</p></div><button className="primary-button" onClick={openCreate}><Plus size={17} />添加服务</button></div>
@@ -188,16 +188,16 @@ function ServiceDashboard() {
           <div className="stats-grid">
             <div className="stat-card"><div className="stat-label">已配置服务</div><div className="stat-value">{services.length}<span>个</span></div><div className="stat-foot"><Globe2 size={14} />所有已登记的服务</div></div>
             <div className="stat-card"><div className="stat-label">已启用</div><div className="stat-value">{enabledCount}<span>个</span></div><div className="stat-foot"><span className="mini-dot green" />已登记并启用</div></div>
-            <div className="stat-card"><div className="stat-label">FRP 配置</div><div className="stat-value">外部管理</div><div className="stat-foot">由你自行配置 FRP 与 DNS</div></div>
+            <div className="stat-card"><div className="stat-label">代理引擎</div><div className="stat-value">Caddy</div><div className="stat-foot">自动同步服务路由</div></div>
           </div>
 
           <section className="panel">
             <div className="panel-heading"><div><h2>全部服务</h2><p>管理内嵌访问入口与目标地址</p></div><button className="icon-button" onClick={() => void load()} title="刷新列表"><RefreshCw size={16} className={loading ? 'spin' : ''} /></button></div>
-            <div className="table-toolbar"><div className="search-box"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索服务名称、域名或目标地址" /></div><span className="result-count">{filtered.length} 项</span></div>
-            {loading ? <div className="empty-state">正在加载服务配置…</div> : filtered.length === 0 ? <div className="empty-state"><div className="empty-icon"><Globe2 size={23} /></div><strong>{query ? '没有匹配的服务' : '还没有配置服务'}</strong><p>{query ? '尝试其他关键词。' : '添加第一个服务，开始整理你的内网访问入口。'}</p>{!query && <button className="secondary-button" onClick={openCreate}><Plus size={16} />添加第一个服务</button>}</div> : <div className="table-wrap"><table><thead><tr><th>服务</th><th>访问域名</th><th>目标地址</th><th>状态</th><th className="actions-heading">操作</th></tr></thead><tbody>{filtered.map((service) => <tr key={service.id}><td><div className="service-name"><div className="service-icon"><Globe2 size={17} /></div><div><strong>{service.name}</strong><small>创建于 {new Date(service.created_at).toLocaleDateString('zh-CN')}</small></div></div></td><td><code className="target-url">/proxy/{service.id}/</code></td><td><code className="target-url">{service.target_url}</code></td><td><button className={`status-pill ${service.enabled ? 'enabled' : 'disabled'}`} onClick={() => void toggle(service)}><span />{service.enabled ? '已启用' : '已停用'}</button></td><td><div className="row-actions"><button className="icon-button" title="编辑服务" onClick={() => openEdit(service)}><Settings2 size={16} /></button><button className="icon-button danger-button" title="删除服务" onClick={() => void remove(service)}><Trash2 size={16} /></button><button className="icon-button" title="在页面内打开服务" onClick={() => setSelectedService(service)}><ArrowUpRight size={16} /></button></div></td></tr>)}</tbody></table></div>}
-            <div className="panel-footer"><span>配置保存在本地 SQLite 数据库中</span><span>FRP / DNS 需单独配置</span></div>
+            <div className="table-toolbar"><div className="search-box"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索服务名称或目标地址" /></div><span className="result-count">{filtered.length} 项</span></div>
+            {loading ? <div className="empty-state">正在加载服务配置…</div> : filtered.length === 0 ? <div className="empty-state"><div className="empty-icon"><Globe2 size={23} /></div><strong>{query ? '没有匹配的服务' : '还没有配置服务'}</strong><p>{query ? '尝试其他关键词。' : '添加第一个服务，开始整理你的内网访问入口。'}</p>{!query && <button className="secondary-button" onClick={openCreate}><Plus size={16} />添加第一个服务</button>}</div> : <div className="table-wrap"><table><thead><tr><th>服务</th><th>内嵌访问路径</th><th>目标地址</th><th>状态</th><th className="actions-heading">操作</th></tr></thead><tbody>{filtered.map((service) => <tr key={service.id}><td><div className="service-name"><div className="service-icon"><Globe2 size={17} /></div><div><strong>{service.name}</strong><small>创建于 {new Date(service.created_at).toLocaleDateString('zh-CN')}</small></div></div></td><td><code className="target-url">/proxy/{service.id}/</code></td><td><code className="target-url">{service.target_url}</code></td><td><button className={`status-pill ${service.enabled ? 'enabled' : 'disabled'}`} onClick={() => void toggle(service)}><span />{service.enabled ? '已启用' : '已停用'}</button></td><td><div className="row-actions"><button className="icon-button" title="编辑服务" onClick={() => openEdit(service)}><Settings2 size={16} /></button><button className="icon-button danger-button" title="删除服务" onClick={() => void remove(service)}><Trash2 size={16} /></button><button className="icon-button" title="在页面内打开服务" onClick={() => setSelectedService(service)}><ArrowUpRight size={16} /></button></div></td></tr>)}</tbody></table></div>}
+            <div className="panel-footer"><span>配置保存在本地 SQLite 数据库中</span><span>Caddy 路由自动同步</span></div>
           </section>
-          <div className="info-banner"><div className="info-symbol">i</div><div><strong>当前版本说明</strong><p>TunnelHub 只保存服务目录，不代理业务流量，也不会自动修改 FRP、DNS 或 Caddy。请单独配置 FRP 映射后再访问对应域名。</p></div></div>
+          <div className="info-banner"><div className="info-symbol">i</div><div><strong>当前版本说明</strong><p>TunnelHub 使用 Caddy 代理业务流量，无需为每个服务配置域名。FRP 与 DNS 仍由你自行配置；部分应用可能需要调整基础路径才能完整嵌入。</p></div></div>
         </section>
         <AccessControlPanel services={services} />
       </main>
