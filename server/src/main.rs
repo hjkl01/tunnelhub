@@ -1,4 +1,5 @@
 mod auth;
+mod caddy;
 mod proxy;
 mod services;
 mod state;
@@ -94,17 +95,36 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState { pool, client };
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/_internal/proxy-auth/{id}", get(proxy::authorize_proxy))
         .nest("/api/auth", auth::router())
         .nest("/api/services", services::router().route_layer(middleware::from_fn_with_state(state.clone(), auth::require_session)))
         .fallback(proxy::handle)
         .with_state(state)
         .layer(TraceLayer::new_for_http());
 
+    let caddy_enabled = env::var("TUNNELHUB_CADDY_ENABLED")
+        .map(|value| value.eq_ignore_ascii_case("true") || value == "1")
+        .unwrap_or(false);
     let address: SocketAddr = env::var("TUNNELHUB_LISTEN")
-        .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
+        .unwrap_or_else(|_| if caddy_enabled { "127.0.0.1:8081".to_string() } else { "0.0.0.0:8080".to_string() })
         .parse()?;
+
+    // In container mode Caddy is the public HTTP entry point. Rust remains bound
+    // to loopback and owns the API, embedded frontend, and forward-auth checks.
+    let _caddy_child = if caddy_enabled {
+        let binary = env::var("TUNNELHUB_CADDY_BIN").unwrap_or_else(|_| "caddy".to_string());
+        let caddy_listen = env::var("TUNNELHUB_CADDY_LISTEN")
+            .unwrap_or_else(|_| "0.0.0.0:8080".to_string());
+        let config_path = env::var_os("TUNNELHUB_CADDY_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/data/Caddyfile"));
+        Some(caddy::start(pool.clone(), binary, caddy_listen, config_path).await?)
+    } else {
+        None
+    };
+
     let listener = tokio::net::TcpListener::bind(address).await?;
-    tracing::info!(%address, "TunnelHub API listening");
+    tracing::info!(%address, caddy_enabled, "TunnelHub API listening");
     axum::serve(listener, app).await?;
     Ok(())
 }
