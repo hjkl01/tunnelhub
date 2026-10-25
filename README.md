@@ -34,7 +34,7 @@ docker compose down --remove-orphans
 docker compose up -d --build
 ```
 
-不要添加 `-v`，否则会删除保存用户、权限和服务配置的命名卷。
+请保留 `./data/tunnelhub_data` 目录；删除该目录会丢失用户、权限和服务配置。
 
 默认管理界面地址为 http://localhost:8088，默认管理域名是 localhost。首次打开时创建管理员账户、设置密码并绑定 TOTP；后续登录必须同时提供密码和动态验证码；无法使用验证器时，可用一次性恢复码登录。**管理域名仍建议保持本机访问，不要加入 FRP 公网映射**，并可在“用户与权限”页面为业务服务配置访问策略。FRP 只需把需要公开的业务服务域名转发到宿主机的 8088 端口。
 
@@ -44,7 +44,7 @@ docker compose up -d --build
 
 登录需要用户名、密码和 TOTP 验证码，也可用一个未使用的恢复码替代 TOTP 验证码。会话使用 HttpOnly、SameSite=Strict Cookie，默认 8 小时过期；登录失败次数按用户名限流。管理员密码使用 Argon2id 哈希存储，恢复码只保存哈希。默认启用 `TUNNELHUB_COOKIE_SECURE=true`，推荐通过 HTTPS 访问管理界面。若仅使用纯 HTTP，且浏览器未在 localhost 场景发送 Secure Cookie，才在 `.env` 中显式设置 `TUNNELHUB_COOKIE_SECURE=false`。业务访问会话也遵循同一设置。
 
-前端由 Vite 构建后嵌入 Rust 可执行文件。Docker 使用 Node、Rust、Caddy 多阶段构建，最终运行一个 TunnelHub 容器，由 Rust 管理 Caddy 子进程和路由配置。Caddy 路由会定期从 SQLite 同步；配置变更通常在数秒内生效。构建时默认使用 DaoCloud Docker Hub 镜像、npmmirror、rsproxy.cn 和清华 Debian 镜像，以减少国内环境下载依赖的耗时。若 Docker 基础镜像镜像站不可用，可改用官方 Docker Hub 地址重新构建：`docker compose build --build-arg DOCKER_MIRROR=docker.io`，然后执行 `docker compose up -d`。认证表和服务配置保存在 Docker 命名卷 `tunnelhub_data` 中。请备份该卷；若丢失 TOTP 设备，可使用一次性恢复码登录。当前管理后台仍是单管理员模型；业务用户由管理员在“用户与权限”页面创建，使用用户名和密码登录受限服务。业务用户目前不支持自行注册或 TOTP 绑定。
+前端由 Vite 构建后嵌入 Rust 可执行文件。Docker 使用 Node、Rust、Caddy 多阶段构建，最终运行一个 TunnelHub 容器，由 Rust 管理 Caddy 子进程和路由配置。Caddy 路由会定期从 SQLite 同步；配置变更通常在数秒内生效。构建时默认使用 DaoCloud Docker Hub 镜像、npmmirror、rsproxy.cn 和清华 Debian 镜像，以减少国内环境下载依赖的耗时。若 Docker 基础镜像镜像站不可用，可改用官方 Docker Hub 地址重新构建：`docker compose build --build-arg DOCKER_MIRROR=docker.io`，然后执行 `docker compose up -d`。认证表和服务配置保存在宿主机目录 `./data/tunnelhub_data` 中。请备份该目录；若丢失 TOTP 设备，可使用一次性恢复码登录。当前管理后台仍是单管理员模型；业务用户由管理员在“用户与权限”页面创建，使用用户名和密码登录受限服务。业务用户目前不支持自行注册或 TOTP 绑定。
 
 ## 添加服务
 
