@@ -79,7 +79,7 @@ async fn render_config(pool: &SqlitePool, listen: &str) -> anyhow::Result<String
     .await?;
 
     let mut config = format!(
-        "{{\n    admin 127.0.0.1:2019\n    auto_https off\n}}\n\n{} {{\n    route {{\n        @internal path /_internal/*\n        respond @internal \\\"Not Found\\\" 404\n",
+        "{{\n    admin 127.0.0.1:2019\n    auto_https off\n}}\n\n{} {{\n    route {{\n        @internal path /_internal/*\n        respond @internal \"Not Found\" 404\n",
         caddy_quote(listen)
     );
 
@@ -111,7 +111,7 @@ async fn render_config(pool: &SqlitePool, listen: &str) -> anyhow::Result<String
             ));
         }
         config.push_str(&format!(
-            "            reverse_proxy {scheme}://{dial} {{\n                header_up X-Forwarded-Prefix {prefix}\n                header_down Location ^/(.*)$ {prefix}/$1\n                header_down Set-Cookie \\\"Path=/\\\" \\\"Path={prefix}/\\\"\n            }}\n        }}\n"
+            "            reverse_proxy {scheme}://{dial} {{\n                header_up X-Forwarded-Prefix {prefix}\n                header_down Location ^/(.*)$ {prefix}/$1\n                header_down Set-Cookie \"Path=/\" \"Path={prefix}/\"\n            }}\n        }}\n"
         ));
     }
 
