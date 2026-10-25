@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       TUNNELHUB_LISTEN: 127.0.0.1:8081
-      TUNNELHUB_CADDY_ENABLED: ${TUNNELHUB_CADDY_ENABLED:-true}
+      TUNNELHUB_CADDY_ENABLED: "true"
       TUNNELHUB_CADDY_LISTEN: 0.0.0.0:8080
       TUNNELHUB_CADDY_BIN: /usr/local/bin/caddy
       TUNNELHUB_CADDY_CONFIG: /data/Caddyfile
