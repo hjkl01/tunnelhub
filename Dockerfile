@@ -19,6 +19,8 @@ COPY server ./server
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 RUN cargo build --release -p tunnelhub-server
 
+FROM ${DOCKER_MIRROR}/library/caddy:2 AS caddy-binary
+
 FROM ${DOCKER_MIRROR}/library/debian:bookworm-slim
 # 复用 Rust 构建镜像中的 CA 证书，避免运行阶段依赖 APT 软件源
 COPY --from=rust-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
@@ -27,7 +29,12 @@ RUN set -eux; \
     mkdir -p /data; \
     chown -R tunnelhub:tunnelhub /data
 COPY --from=rust-builder /app/target/release/tunnelhub-server /usr/local/bin/tunnelhub-server
-ENV TUNNELHUB_LISTEN=0.0.0.0:8080
+COPY --from=caddy-binary /usr/bin/caddy /usr/local/bin/caddy
+ENV TUNNELHUB_LISTEN=127.0.0.1:8081
+ENV TUNNELHUB_CADDY_ENABLED=true
+ENV TUNNELHUB_CADDY_LISTEN=0.0.0.0:8080
+ENV TUNNELHUB_CADDY_BIN=/usr/local/bin/caddy
+ENV TUNNELHUB_CADDY_CONFIG=/data/Caddyfile
 ENV TUNNELHUB_DATABASE_URL=sqlite:///data/tunnelhub.db
 ENV TUNNELHUB_UI_HOST=localhost
 EXPOSE 8080
