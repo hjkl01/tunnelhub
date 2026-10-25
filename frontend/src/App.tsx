@@ -179,6 +179,7 @@ function ServiceDashboard() {
       <main className="main">
         <header className="topbar"><div className="breadcrumbs">工作空间 <span>/</span> <strong>服务管理</strong></div><div className="topbar-actions"><button className="icon-button" title="关于 TunnelHub" onClick={() => setNotice('TunnelHub：统一管理内网服务访问入口。底层 Caddy、FRP 由你自行管理。')}><CircleHelp size={18} /></button><button className="logout-button" onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.reload() }}><LogOut size={15} />退出登录</button></div></header>
         <section className="page-content">
+          {selectedService && <section className="panel embedded-viewer"><div className="panel-heading"><div><h2>{selectedService.name}</h2><p>/proxy/{selectedService.id}/</p></div><button className="secondary-button" onClick={() => setSelectedService(null)}>关闭视图</button></div><iframe title={selectedService.name} src={`/proxy/${selectedService.id}/`} /></section>}
           <div className="page-heading"><div><div className="eyebrow">NETWORK CONTROL PLANE</div><h1>服务管理</h1><p>统一登记服务地址与访问域名；公网映射由你自行配置 FRP。</p></div><button className="primary-button" onClick={openCreate}><Plus size={17} />添加服务</button></div>
 
           {error && <div className="alert error-alert"><span>{error}</span><button onClick={() => setError('')} aria-label="关闭"><X size={16} /></button></div>}
