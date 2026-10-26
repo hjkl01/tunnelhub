@@ -46,6 +46,16 @@ docker compose up -d --build
 
 前端由 Vite 构建后嵌入 Rust 可执行文件。Docker 使用 Node、Rust、Caddy 多阶段构建，最终运行一个 TunnelHub 容器，由 Rust 管理 Caddy 子进程和路由配置。Caddy 路由会定期从 SQLite 同步；配置变更通常在数秒内生效。构建时默认使用 DaoCloud Docker Hub 镜像、npmmirror、rsproxy.cn 和清华 Debian 镜像，以减少国内环境下载依赖的耗时。若 Docker 基础镜像镜像站不可用，可改用官方 Docker Hub 地址重新构建：`docker compose build --build-arg DOCKER_MIRROR=docker.io`，然后执行 `docker compose up -d`。认证表和服务配置保存在宿主机目录 `./data/tunnelhub_data` 中。请备份该目录；若丢失 TOTP 设备，可使用一次性恢复码登录。当前管理后台仍是单管理员模型；业务用户由管理员在“用户与权限”页面创建，使用用户名和密码登录受限服务。业务用户目前不支持自行注册或 TOTP 绑定。
 
+## 管理界面
+
+左侧导航把管理功能拆分为独立路由，可直接用 `#/services`、`#/access`、`#/network`、`#/logs`、`#/settings` 打开：
+
+- **服务管理**：登记、启停和删除目标服务，并通过内嵌视图访问；可同时打开多个服务，通过顶部标签点击切换（每个 iframe 保持加载状态），支持最大化（按 Esc 还原）和全部关闭。
+- **用户与权限**：创建业务用户和用户组，为每个服务配置公开或受限访问。
+- **网络组件**：查看内置 Caddy 状态、监听地址、管理域名、服务域名、Cookie Secure 和自动生成的 Caddyfile。
+- **访问日志**：查看经代理访问服务的鉴权结果（放行 / 需登录 / 无权限 / 服务不存在），支持搜索和自动刷新。
+- **平台设置**：查看会话与安全相关的运行时配置。
+
 ## 添加服务
 
 在管理界面填写服务名称和目标 URL。目标 URL 是 TunnelHub 容器需要访问的地址，例如：
@@ -79,6 +89,7 @@ make build
 - 服务配置保存在 SQLite；Caddy 按同源路径 `/proxy/{service_id}/` 代理 HTTP，并支持 WebSocket；设置 `TUNNELHUB_SERVICE_DOMAIN` 后额外提供 `<id>.<TUNNELHUB_SERVICE_DOMAIN>` 子域路由。
 - 管理后台支持管理员密码 + TOTP、一次性恢复码和会话校验；业务访问支持用户、用户组和按服务授权。
 - 受限服务由 Caddy 在每次请求时调用 Rust forward-auth 检查用户会话和 ACL；登录会话使用同源 Cookie。
-- 业务用户目前使用密码登录，尚未支持业务用户 TOTP、细粒度读写权限或访问日志。
+- 业务用户目前使用密码登录，尚未支持业务用户 TOTP 或细粒度读写权限。
+- 访问日志记录 Caddy forward-auth 的鉴权结果（放行 / 需登录 / 无权限 / 服务不存在），仅保留最近 5000 条；不记录上游服务的响应状态和响应体。
 - Caddy 自动同步服务路由；容器入口仍为 HTTP，TLS/FRP/DNS 由部署者按需配置。
 - 代理会重写部分根路径重定向和 Cookie Path；对于硬编码根绝对路径的应用（如 Next.js 的 `/_next/...`、`/api/...`），除按请求 `Referer` 回退外，管理页内嵌视图默认使用同源 `/proxy/{service_id}/` 路径；配置 `TUNNELHUB_SERVICE_DOMAIN` 后改用服务子域，使应用运行在独立源的根路径，避免客户端路由/动态 chunk 因丢失前缀而失败。使用子域需要浏览器能解析 `*.<TUNNELHUB_SERVICE_DOMAIN>`。若目标应用通过 CSP、X-Frame-Options 禁止 iframe，仍可能需要单独调整应用配置。
