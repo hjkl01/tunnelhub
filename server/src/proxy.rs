@@ -74,55 +74,96 @@ pub async fn handle(State(state): State<AppState>, request: Request<Body>) -> Re
     if let Some((service_id, service_path)) = embedded_service_path(request.uri().path()) {
         return handle_embedded_service(&state, request, &service_id, &service_path).await;
     }
+
     let Some(host) = request.headers().get(HOST).and_then(|value| value.to_str().ok())
         .map(normalize_request_host).filter(|value| !value.is_empty()) else {
         return plain(StatusCode::BAD_REQUEST, "缺少有效的 Host 请求头");
     };
 
-    // 管理界面由 Rust 直接提供，且仅响应配置的管理域名。
-    let ui_host = env::var("TUNNELHUB_UI_HOST").unwrap_or_else(|_| "localhost".to_string());
-    if host == normalize_request_host(&ui_host) {
+    // Each service is also reachable at `<id>.<service-domain>` where it runs at
+    // the origin root, so apps that hardcode absolute paths work unmodified. This
+    // only applies when a service domain is configured explicitly; path-based
+    // access via `/proxy/{id}/` works on any host.
+    if let Some(service_domain) = configured_service_domain() {
+        if let Some(service_id) = service_id_from_host(&host, &service_domain) {
+            let enabled = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM services WHERE id = ? AND enabled = 1",
+            )
+            .bind(&service_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap_or(0);
+            if enabled > 0 {
+                let service_path = request.uri().path().to_string();
+                return handle_embedded_service(&state, request, &service_id, &service_path).await;
+            }
+        }
+    }
+
+    // Apps that hardcode root-absolute URLs (Next.js `/_next/...`, `/api/...`,
+    // client-side routes) escape the `/proxy/{id}/` prefix. The browser still
+    // sends a Referer pointing at the embedded page, so forward the request to
+    // the same service as if it were served at the origin root.
+    if let Some(service_id) = escape_service_id(request.headers()) {
+        let enabled = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM services WHERE id = ? AND enabled = 1",
+        )
+        .bind(&service_id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or(0);
+        if enabled > 0 {
+            let service_path = request.uri().path().to_string();
+            return handle_embedded_service(&state, request, &service_id, &service_path).await;
+        }
+    }
+
+    // Any other host serves the management UI. When TUNNELHUB_UI_HOST is set it
+    // acts as an allowlist; leaving it unset lets TunnelHub run behind FRP on an
+    // arbitrary domain without extra configuration.
+    if admin_host_allowed(Some(&host)) {
         return serve_frontend(&request);
     }
 
-    let service = match sqlx::query_as::<_, (String, String, String)>(
-        "SELECT id, target_url, access_mode FROM services WHERE hostname = ? AND enabled = 1",
-    ).bind(&host).fetch_optional(&state.pool).await {
-        Ok(Some(value)) => value,
-        Ok(None) => return plain(StatusCode::NOT_FOUND, "没有找到该域名对应的已启用服务"),
-        Err(error) => {
-            tracing::error!(?error, "读取服务路由失败");
-            return plain(StatusCode::INTERNAL_SERVER_ERROR, "读取服务路由失败");
-        }
-    };
-    let (service_id, target, access_mode) = service;
+    plain(StatusCode::NOT_FOUND, "该域名不在允许的管理域名列表中")
+}
 
-    if request.uri().path() == "/.tunnelhub/login" && request.method() == axum::http::Method::POST {
-        return member_login(&state, request, &service_id, &access_mode).await;
-    }
+/// Explicit `TUNNELHUB_SERVICE_DOMAIN`, used to expose each service at
+/// `<id>.<service-domain>`. When unset, services are only reachable through the
+/// same-origin path `/proxy/{id}/`, which works on any host.
+pub fn service_domain() -> Option<String> {
+    configured_service_domain()
+}
 
-    if access_mode == "restricted" {
-        let member_id = member_from_request(&state, request.headers()).await;
-        let Some(member_id) = member_id else {
-            if request.headers().get("accept").and_then(|v| v.to_str().ok()).unwrap_or("").contains("text/html")
-                && request.method() == axum::http::Method::GET {
-                return login_page_at("/.tunnelhub/login");
-            }
-            return plain(StatusCode::UNAUTHORIZED, "该服务需要登录后访问");
-        };
-        let allowed = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM service_acl a WHERE a.service_id = ? AND ((a.subject_type = 'user' AND a.subject_id = ?) OR (a.subject_type = 'group' AND a.subject_id IN (SELECT group_id FROM group_members WHERE member_id = ?)))",
-        ).bind(&service_id).bind(member_id).bind(member_id).fetch_one(&state.pool).await;
-        match allowed {
-            Ok(count) if count > 0 => {},
-            Ok(_) => return plain(StatusCode::FORBIDDEN, "你的账户没有访问此服务的权限"),
-            Err(error) => {
-                tracing::error!(?error, "检查服务访问权限失败");
-                return plain(StatusCode::INTERNAL_SERVER_ERROR, "检查服务访问权限失败");
-            }
-        }
+fn configured_service_domain() -> Option<String> {
+    env::var("TUNNELHUB_SERVICE_DOMAIN")
+        .ok()
+        .map(|value| value.trim().trim_matches('.').to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Optional management-domain allowlist. When `TUNNELHUB_UI_HOST` is unset any
+/// host is accepted, so TunnelHub works behind FRP without configuring a domain.
+pub fn admin_host_allowed(host: Option<&str>) -> bool {
+    match env::var("TUNNELHUB_UI_HOST")
+        .ok()
+        .map(|value| value.trim().trim_matches('.').to_string())
+        .filter(|value| !value.is_empty())
+    {
+        None => true,
+        Some(configured) => host
+            .map(normalize_request_host)
+            .is_some_and(|actual| actual == normalize_request_host(&configured)),
     }
-    forward(&state, request, &target).await
+}
+
+fn service_id_from_host(host: &str, service_domain: &str) -> Option<String> {
+    let service_domain = normalize_request_host(service_domain);
+    let id = host.strip_suffix(&format!(".{service_domain}"))?;
+    if id.is_empty() || id.contains('.') || id == "www" {
+        return None;
+    }
+    Some(id.to_string())
 }
 
 fn embedded_service_path(path: &str) -> Option<(String, String)> {
@@ -135,6 +176,23 @@ fn embedded_service_path(path: &str) -> Option<(String, String)> {
         return None;
     }
     Some((id.to_string(), suffix))
+}
+
+/// Extract the embedded service id from a same-origin `Referer` such as
+/// `http://localhost:8088/proxy/<id>/login`.
+fn escape_service_id(headers: &HeaderMap) -> Option<String> {
+    let referer = headers.get("referer")?.to_str().ok()?;
+    let referer_url = Url::parse(referer).ok()?;
+    let request_host = headers.get(HOST)?.to_str().ok()?;
+    if referer_url.host_str()? != normalize_request_host(request_host) {
+        return None;
+    }
+    let rest = referer_url.path().strip_prefix("/proxy/")?;
+    let id = rest.split('/').next().unwrap_or_default();
+    if id.is_empty() || id.contains('/') {
+        return None;
+    }
+    Some(id.to_string())
 }
 
 async fn handle_embedded_service(
@@ -514,7 +572,17 @@ fn plain(status: StatusCode, message: &'static str) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_request_host;
+    use super::{escape_service_id, normalize_request_host, service_id_from_host};
+    use axum::http::{HeaderMap, HeaderValue};
+
+    fn headers(referer: Option<&str>, host: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(axum::http::header::HOST, HeaderValue::from_str(host).unwrap());
+        if let Some(referer) = referer {
+            headers.insert("referer", HeaderValue::from_str(referer).unwrap());
+        }
+        headers
+    }
 
     #[test]
     fn parses_embedded_service_path() {
@@ -527,6 +595,33 @@ mod tests {
             Some(("abc-123".to_string(), "/".to_string()))
         );
         assert_eq!(super::embedded_service_path("/proxy/"), None);
+    }
+
+    #[test]
+    fn extracts_service_from_same_origin_referer() {
+        assert_eq!(
+            escape_service_id(&headers(Some("http://localhost:8088/proxy/abc-123/login"), "localhost:8088")),
+            Some("abc-123".to_string())
+        );
+        assert_eq!(
+            escape_service_id(&headers(Some("http://localhost:8088/proxy/abc-123"), "localhost:8088")),
+            Some("abc-123".to_string())
+        );
+        // Cross-origin referers are ignored.
+        assert_eq!(
+            escape_service_id(&headers(Some("http://evil.example/proxy/abc-123/login"), "localhost:8088")),
+            None
+        );
+        assert_eq!(escape_service_id(&headers(None, "localhost:8088")), None);
+    }
+
+    #[test]
+    fn extracts_service_from_subdomain() {
+        assert_eq!(service_id_from_host("abc-123.localhost", "localhost"), Some("abc-123".to_string()));
+        assert_eq!(service_id_from_host("abc-123.example.com", "example.com"), Some("abc-123".to_string()));
+        assert_eq!(service_id_from_host("localhost", "localhost"), None);
+        assert_eq!(service_id_from_host("a.b.localhost", "localhost"), None);
+        assert_eq!(service_id_from_host("evil-example.com", "example.com"), None);
     }
 
     #[test]

@@ -12,10 +12,11 @@ services:
       TUNNELHUB_CADDY_CONFIG: /data/Caddyfile
       TUNNELHUB_DATABASE_URL: sqlite:///data/tunnelhub.db
       TUNNELHUB_COOKIE_SECURE: ${TUNNELHUB_COOKIE_SECURE:-true}
-      TUNNELHUB_UI_HOST: ${TUNNELHUB_UI_HOST:-localhost}
+      TUNNELHUB_UI_HOST: ${TUNNELHUB_UI_HOST:-}
+      TUNNELHUB_SERVICE_DOMAIN: ${TUNNELHUB_SERVICE_DOMAIN:-}
     volumes:
       - ./data/tunnelhub_data:/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:${TUNNELHUB_PORT:-8088}:8080"
+      - "0.0.0.0:${TUNNELHUB_PORT:-8088}:8080"

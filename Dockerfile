@@ -36,7 +36,6 @@ ENV TUNNELHUB_CADDY_LISTEN=0.0.0.0:8080
 ENV TUNNELHUB_CADDY_BIN=/usr/local/bin/caddy
 ENV TUNNELHUB_CADDY_CONFIG=/data/Caddyfile
 ENV TUNNELHUB_DATABASE_URL=sqlite:///data/tunnelhub.db
-ENV TUNNELHUB_UI_HOST=localhost
 EXPOSE 8080
 USER tunnelhub
 ENTRYPOINT ["/usr/local/bin/tunnelhub-server"]

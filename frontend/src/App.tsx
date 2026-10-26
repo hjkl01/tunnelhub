@@ -5,16 +5,15 @@ import { Activity, ArrowUpRight, CircleHelp, Globe2, LayoutDashboard, LogOut, Pl
 type Service = {
   id: string
   name: string
-  hostname: string
   target_url: string
   enabled: boolean
   created_at: string
   updated_at: string
   access_mode: string
 }
-type Draft = { name: string; hostname?: string; target_url: string; enabled: boolean }
+type Draft = { name: string; target_url: string; enabled: boolean }
 type TargetTestResult = { reachable: boolean; status: number; final_url: string; content_type?: string | null }
-const emptyDraft: Draft = { name: '', target_url: 'http://host.docker.internal:3000', enabled: true }
+const emptyDraft: Draft = { name: '', target_url: 'http://host.docker.internal:', enabled: true }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -78,6 +77,7 @@ function ServiceDashboard() {
   const [services, setServices] = useState<Service[]>([])
   const [section, setSection] = useState('services')
   const [selectedService, setSelectedService] = useState<Service | null>(null)
+  const [serviceDomain, setServiceDomain] = useState('')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -102,6 +102,20 @@ function ServiceDashboard() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    void api<{ service_domain?: string | null }>('/api/health')
+      .then((health) => setServiceDomain(health.service_domain || ''))
+      .catch(() => setServiceDomain(''))
+  }, [])
+
+  const serviceOrigin = (id: string) => {
+    // Without an explicit service domain, use same-origin path routing so the
+    // embedded view works on any host (for example a domain exposed through FRP).
+    if (!serviceDomain) return `${window.location.origin}/proxy/${id}`
+    const port = window.location.port ? `:${window.location.port}` : ''
+    return `${window.location.protocol}//${id}.${serviceDomain}${port}`
+  }
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -200,7 +214,7 @@ function ServiceDashboard() {
       <main className="main">
         <header className="topbar"><div className="breadcrumbs">工作空间 <span>/</span> <strong>服务管理</strong></div><div className="topbar-actions"><button className="icon-button" title="关于 TunnelHub" onClick={() => setNotice('TunnelHub：统一管理内网服务，并在页面内嵌访问目标服务。')}><CircleHelp size={18} /></button><button className="logout-button" onClick={async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.reload() }}><LogOut size={15} />退出登录</button></div></header>
         <section className="page-content">
-          {selectedService && <section className="panel embedded-viewer"><div className="panel-heading"><div><h2>{selectedService.name}</h2><p>/proxy/{selectedService.id}/</p></div><button className="secondary-button" onClick={() => setSelectedService(null)}>关闭视图</button></div><iframe title={selectedService.name} src={`/proxy/${selectedService.id}/`} /></section>}
+          {selectedService && <section className="panel embedded-viewer"><div className="panel-heading"><div><h2>{selectedService.name}</h2><p>{serviceOrigin(selectedService.id)}</p></div><button className="secondary-button" onClick={() => setSelectedService(null)}>关闭视图</button></div><iframe title={selectedService.name} src={`${serviceOrigin(selectedService.id)}/`} /></section>}
           <div className="page-heading"><div><div className="eyebrow">NETWORK CONTROL PLANE</div><h1>服务管理</h1><p>登记可通过 HTTP 访问的目标服务，并通过同源路径内嵌打开；无需为服务单独配置域名。</p></div><button className="primary-button" onClick={openCreate}><Plus size={17} />添加服务</button></div>
 
           {error && <div className="alert error-alert"><span>{error}</span><button onClick={() => setError('')} aria-label="关闭"><X size={16} /></button></div>}
@@ -215,7 +229,7 @@ function ServiceDashboard() {
           <section className="panel">
             <div className="panel-heading"><div><h2>全部服务</h2><p>目标地址由 TunnelHub 通过 HTTP/HTTPS 访问，浏览器通过同源代理路径打开</p></div><button className="icon-button" onClick={() => void load()} title="刷新列表"><RefreshCw size={16} className={loading ? 'spin' : ''} /></button></div>
             <div className="table-toolbar"><div className="search-box"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索服务名称或目标地址" /></div><span className="result-count">{filtered.length} 项</span></div>
-            {loading ? <div className="empty-state">正在加载服务配置…</div> : filtered.length === 0 ? <div className="empty-state"><div className="empty-icon"><Globe2 size={23} /></div><strong>{query ? '没有匹配的服务' : '还没有配置服务'}</strong><p>{query ? '尝试其他关键词。' : '添加第一个服务，开始整理你的内网访问入口。'}</p>{!query && <button className="secondary-button" onClick={openCreate}><Plus size={16} />添加第一个服务</button>}</div> : <div className="table-wrap"><table><thead><tr><th>服务</th><th>内嵌访问路径</th><th>目标地址</th><th>状态</th><th className="actions-heading">操作</th></tr></thead><tbody>{filtered.map((service) => <tr key={service.id}><td><div className="service-name"><div className="service-icon"><Globe2 size={17} /></div><div><strong>{service.name}</strong><small>创建于 {new Date(service.created_at).toLocaleDateString('zh-CN')}</small></div></div></td><td><code className="target-url">/proxy/{service.id}/</code></td><td><code className="target-url">{service.target_url}</code></td><td><button className={`status-pill ${service.enabled ? 'enabled' : 'disabled'}`} onClick={() => void toggle(service)}><span />{service.enabled ? '已启用' : '已停用'}</button></td><td><div className="row-actions"><button className="icon-button" title="编辑服务" onClick={() => openEdit(service)}><Settings2 size={16} /></button><button className="icon-button danger-button" title="删除服务" onClick={() => void remove(service)}><Trash2 size={16} /></button><button className="icon-button" title="在页面内打开服务" onClick={() => setSelectedService(service)}><ArrowUpRight size={16} /></button></div></td></tr>)}</tbody></table></div>}
+            {loading ? <div className="empty-state">正在加载服务配置…</div> : filtered.length === 0 ? <div className="empty-state"><div className="empty-icon"><Globe2 size={23} /></div><strong>{query ? '没有匹配的服务' : '还没有配置服务'}</strong><p>{query ? '尝试其他关键词。' : '添加第一个服务，开始整理你的内网访问入口。'}</p>{!query && <button className="secondary-button" onClick={openCreate}><Plus size={16} />添加第一个服务</button>}</div> : <div className="table-wrap"><table><thead><tr><th>服务</th><th>内嵌访问路径</th><th>目标地址</th><th>状态</th><th className="actions-heading">操作</th></tr></thead><tbody>{filtered.map((service) => <tr key={service.id}><td><div className="service-name"><div className="service-icon"><Globe2 size={17} /></div><div><strong>{service.name}</strong><small>创建于 {new Date(service.created_at).toLocaleDateString('zh-CN')}</small></div></div></td><td><code className="target-url">{serviceOrigin(service.id).replace(/^https?:\/\//, '')}</code></td><td><code className="target-url">{service.target_url}</code></td><td><button className={`status-pill ${service.enabled ? 'enabled' : 'disabled'}`} onClick={() => void toggle(service)}><span />{service.enabled ? '已启用' : '已停用'}</button></td><td><div className="row-actions"><button className="icon-button" title="编辑服务" onClick={() => openEdit(service)}><Settings2 size={16} /></button><button className="icon-button danger-button" title="删除服务" onClick={() => void remove(service)}><Trash2 size={16} /></button><button className="icon-button" title="在页面内打开服务" onClick={() => setSelectedService(service)}><ArrowUpRight size={16} /></button></div></td></tr>)}</tbody></table></div>}
             <div className="panel-footer"><span>配置保存在本地 SQLite 数据库中</span><span>Caddy 路由自动同步</span></div>
           </section>
           <div className="info-banner"><div className="info-symbol">i</div><div><strong>当前版本说明</strong><p>TunnelHub 使用 Caddy 代理业务流量，无需为每个服务配置域名。FRP 与 DNS 仍由你自行配置；部分应用可能需要调整基础路径才能完整嵌入。</p></div></div>
@@ -223,7 +237,7 @@ function ServiceDashboard() {
         <AccessControlPanel services={services} />
       </main>
 
-      {dialog && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setDialog(false) }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div className="modal-header"><div><h2 id="dialog-title">{editing ? '编辑服务' : '添加服务'}</h2><p>填写服务名称和容器可访问的目标地址</p></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="关闭"><X size={18} /></button></div><form onSubmit={save}><label>服务名称<input autoFocus required maxLength={200} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：Home Assistant" /></label><label>旧版访问域名（可选）<input value={draft.hostname ?? ''} onChange={(e) => setDraft({ ...draft, hostname: e.target.value })} placeholder="留空即可，例如 ha.example.com" /><small>仅用于兼容旧版按 Host 访问；新服务无需填写。</small></label><label>目标 HTTP 地址<input required type="url" value={draft.target_url} onChange={(e) => { setDraft({ ...draft, target_url: e.target.value }); setTargetTestResult('') }} placeholder="http://host.docker.internal:8123" /><small>填写 TunnelHub 容器能够访问的完整 HTTP/HTTPS 地址。此地址不需要浏览器直连，也不需要独立域名。</small><div className="target-test-row"><button type="button" className="secondary-button" onClick={() => void testTarget()} disabled={testingTarget || !draft.target_url.trim()}>{testingTarget ? '检测中…' : '测试 HTTP 连通性'}</button>{targetTestResult && <small role="status">{targetTestResult}</small>}</div></label><label className="checkbox-label"><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />启用此服务配置</label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>取消</button><button type="submit" className="primary-button" disabled={saving}>{saving ? '保存中…' : editing ? '保存修改' : '添加服务'}</button></div></form></section></div>}
+      {dialog && <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setDialog(false) }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="dialog-title"><div className="modal-header"><div><h2 id="dialog-title">{editing ? '编辑服务' : '添加服务'}</h2><p>填写服务名称和容器可访问的目标地址</p></div><button className="icon-button" onClick={() => setDialog(false)} aria-label="关闭"><X size={18} /></button></div><form onSubmit={save}><label>服务名称<input autoFocus required maxLength={200} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：Home Assistant" /></label><label>目标 HTTP 地址<input required type="text" inputMode="url" autoComplete="off" value={draft.target_url} onChange={(e) => { setDraft({ ...draft, target_url: e.target.value }); setTargetTestResult('') }} placeholder="http://host.docker.internal:8123" /><small>已默认填入宿主机前缀 http://host.docker.internal:，只需补上端口（例如 8123）；也可改成局域网地址，如 http://192.168.1.20:8080。</small><div className="target-test-row"><button type="button" className="secondary-button" onClick={() => void testTarget()} disabled={testingTarget || !draft.target_url.trim()}>{testingTarget ? '检测中…' : '测试 HTTP 连通性'}</button>{targetTestResult && <small role="status">{targetTestResult}</small>}</div></label><label className="checkbox-label"><input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />启用此服务配置</label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setDialog(false)}>取消</button><button type="submit" className="primary-button" disabled={saving}>{saving ? '保存中…' : editing ? '保存修改' : '添加服务'}</button></div></form></section></div>}
     </div>
   )
 }

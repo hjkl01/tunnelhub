@@ -18,7 +18,6 @@ use crate::state::AppState;
 pub struct Service {
     pub id: String,
     pub name: String,
-    pub hostname: String,
     pub target_url: String,
     pub enabled: bool,
     pub access_mode: String,
@@ -29,7 +28,6 @@ pub struct Service {
 #[derive(Debug, Deserialize)]
 pub struct CreateService {
     pub name: String,
-    pub hostname: Option<String>,
     pub target_url: String,
     pub enabled: Option<bool>,
     pub access_mode: Option<String>,
@@ -38,7 +36,6 @@ pub struct CreateService {
 #[derive(Debug, Deserialize)]
 pub struct UpdateService {
     pub name: Option<String>,
-    pub hostname: Option<String>,
     pub target_url: Option<String>,
     pub enabled: Option<bool>,
     pub access_mode: Option<String>,
@@ -119,7 +116,7 @@ async fn test_target(
 
 async fn list_services(State(state): State<AppState>) -> Result<Json<Vec<Service>>, (StatusCode, Json<ApiError>)> {
     let rows = sqlx::query_as::<_, Service>(
-        "SELECT id, name, hostname, target_url, enabled, access_mode, created_at, updated_at FROM services ORDER BY name COLLATE NOCASE"
+        "SELECT id, name, target_url, enabled, access_mode, created_at, updated_at FROM services ORDER BY name COLLATE NOCASE"
     )
     .fetch_all(&state.pool)
     .await
@@ -132,7 +129,7 @@ async fn get_service(
     Path(id): Path<String>,
 ) -> Result<Json<Service>, (StatusCode, Json<ApiError>)> {
     let row = sqlx::query_as::<_, Service>(
-        "SELECT id, name, hostname, target_url, enabled, access_mode, created_at, updated_at FROM services WHERE id = ?"
+        "SELECT id, name, target_url, enabled, access_mode, created_at, updated_at FROM services WHERE id = ?"
     )
     .bind(id)
     .fetch_optional(&state.pool)
@@ -147,19 +144,14 @@ async fn create_service(
     Json(input): Json<CreateService>,
 ) -> Result<(StatusCode, Json<Service>), (StatusCode, Json<ApiError>)> {
     let name = required(input.name, "name")?;
-    // hostname is retained only for legacy Host-based routes. New services use a stable internal hostname.
     let target_url = validate_target(&input.target_url)?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let id = Uuid::new_v4().to_string();
-    let hostname = match input.hostname.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
-        Some(value) => normalize_hostname(value)?,
-        None => format!("service-{}.tunnelhub.internal", id.replace('-', "")),
-    };
     let enabled = input.enabled.unwrap_or(true);
     let access_mode = validate_access_mode(input.access_mode.as_deref().unwrap_or("public"))?;
 
-    sqlx::query("INSERT INTO services (id, name, hostname, target_url, enabled, access_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(&id).bind(&name).bind(&hostname).bind(&target_url).bind(enabled).bind(access_mode).bind(&now).bind(&now)
+    sqlx::query("INSERT INTO services (id, name, target_url, enabled, access_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .bind(&id).bind(&name).bind(&target_url).bind(enabled).bind(access_mode).bind(&now).bind(&now)
         .execute(&state.pool).await.map_err(conflict_or_internal)?;
 
     let service = fetch_by_id(&state, id).await?;
@@ -173,14 +165,13 @@ async fn update_service(
 ) -> Result<Json<Service>, (StatusCode, Json<ApiError>)> {
     let current = fetch_optional(&state, &id).await?.ok_or_else(not_found)?;
     let name = match input.name { Some(value) => required(value, "name")?, None => current.name };
-    let hostname = match input.hostname.as_deref().map(str::trim).filter(|value| !value.is_empty()) { Some(value) => normalize_hostname(value)?, None => current.hostname };
     let target_url = match input.target_url { Some(value) => validate_target(&value)?, None => current.target_url };
     let enabled = input.enabled.unwrap_or(current.enabled);
     let access_mode = validate_access_mode(input.access_mode.as_deref().unwrap_or(&current.access_mode))?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
 
-    sqlx::query("UPDATE services SET name = ?, hostname = ?, target_url = ?, enabled = ?, access_mode = ?, updated_at = ? WHERE id = ?")
-        .bind(name).bind(hostname).bind(target_url).bind(enabled).bind(access_mode).bind(now).bind(&id)
+    sqlx::query("UPDATE services SET name = ?, target_url = ?, enabled = ?, access_mode = ?, updated_at = ? WHERE id = ?")
+        .bind(name).bind(target_url).bind(enabled).bind(access_mode).bind(now).bind(&id)
         .execute(&state.pool).await.map_err(conflict_or_internal)?;
     Ok(Json(fetch_by_id(&state, id).await?))
 }
@@ -202,7 +193,7 @@ async fn delete_service(
 
 async fn fetch_optional(state: &AppState, id: &str) -> Result<Option<Service>, (StatusCode, Json<ApiError>)> {
     sqlx::query_as::<_, Service>(
-        "SELECT id, name, hostname, target_url, enabled, access_mode, created_at, updated_at FROM services WHERE id = ?"
+        "SELECT id, name, target_url, enabled, access_mode, created_at, updated_at FROM services WHERE id = ?"
     )
     .bind(id).fetch_optional(&state.pool).await.map_err(internal_error)
 }
@@ -364,24 +355,6 @@ fn required(value: String, field: &str) -> Result<String, (StatusCode, Json<ApiE
     Ok(value.to_string())
 }
 
-fn normalize_hostname(value: &str) -> Result<String, (StatusCode, Json<ApiError>)> {
-    let value = value.trim().trim_end_matches('.').to_ascii_lowercase();
-    if value.is_empty() || value.len() > 253 || value.contains('/') || value.contains(':') || value.chars().any(char::is_whitespace) {
-        return Err((StatusCode::BAD_REQUEST, ApiError::new("hostname 必须是有效的主机名，不含协议、端口或路径")));
-    }
-    let valid = value.split('.').all(|label| {
-        !label.is_empty()
-            && label.len() <= 63
-            && !label.starts_with('-')
-            && !label.ends_with('-')
-            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-    });
-    if !valid {
-        return Err((StatusCode::BAD_REQUEST, ApiError::new("hostname 格式无效")));
-    }
-    Ok(value)
-}
-
 fn validate_target(value: &str) -> Result<String, (StatusCode, Json<ApiError>)> {
     let value = value.trim();
     let parsed = Url::parse(value)
@@ -407,7 +380,7 @@ fn internal_error(error: sqlx::Error) -> (StatusCode, Json<ApiError>) {
 fn conflict_or_internal(error: sqlx::Error) -> (StatusCode, Json<ApiError>) {
     if let sqlx::Error::Database(database_error) = &error {
         if database_error.is_unique_violation() {
-            return (StatusCode::CONFLICT, ApiError::new("该访问主机名已被使用"));
+            return (StatusCode::CONFLICT, ApiError::new("数据已存在或与现有记录冲突"));
         }
     }
     internal_error(error)

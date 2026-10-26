@@ -55,9 +55,9 @@ async fn main() -> anyhow::Result<()> {
         r#"CREATE TABLE IF NOT EXISTS services (
             id TEXT PRIMARY KEY NOT NULL,
             name TEXT NOT NULL,
-            hostname TEXT NOT NULL UNIQUE,
             target_url TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
+            access_mode TEXT NOT NULL DEFAULT 'public',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )"#,
@@ -70,6 +70,10 @@ async fn main() -> anyhow::Result<()> {
     if !service_columns.iter().any(|name| name == "access_mode") {
         sqlx::query("ALTER TABLE services ADD COLUMN access_mode TEXT NOT NULL DEFAULT 'public'")
             .execute(&pool).await?;
+    }
+    // 旧版本保留了按 Host 访问的 hostname 列，现已移除。
+    if service_columns.iter().any(|name| name == "hostname") {
+        drop_legacy_hostname_column(&pool).await?;
     }
     sqlx::query("CREATE TABLE IF NOT EXISTS members (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)")
         .execute(&pool).await?;
@@ -118,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
         let config_path = env::var_os("TUNNELHUB_CADDY_CONFIG")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/data/Caddyfile"));
-        Some(caddy::start(pool.clone(), binary, caddy_listen, config_path).await?)
+        Some(caddy::start(pool.clone(), binary, caddy_listen, config_path, proxy::service_domain()).await?)
     } else {
         None
     };
@@ -142,8 +146,59 @@ async fn health() -> axum::Json<serde_json::Value> {
     axum::Json(serde_json::json!({
         "status": "ok",
         "service": "tunnelhub-server",
-        "version": env!("CARGO_PKG_VERSION")
+        "version": env!("CARGO_PKG_VERSION"),
+        "service_domain": proxy::service_domain()
     }))
+}
+
+/// Rebuild the `services` table without the legacy `hostname` column.
+///
+/// SQLite cannot drop a column that carries a UNIQUE constraint, so the table
+/// is recreated and its rows copied over. Foreign keys are disabled for the
+/// duration of the migration so that dropping the old table does not cascade
+/// delete rows in `service_acl`.
+async fn drop_legacy_hostname_column(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
+    let mut conn = pool.acquire().await?;
+    sqlx::query("PRAGMA foreign_keys = OFF").execute(&mut *conn).await?;
+    sqlx::query("BEGIN").execute(&mut *conn).await?;
+    let migration = async {
+        sqlx::query(
+            r#"CREATE TABLE services_new (
+                id TEXT PRIMARY KEY NOT NULL,
+                name TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                access_mode TEXT NOT NULL DEFAULT 'public',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"#,
+        )
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query(
+            "INSERT INTO services_new (id, name, target_url, enabled, access_mode, created_at, updated_at) SELECT id, name, target_url, enabled, access_mode, created_at, updated_at FROM services",
+        )
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query("DROP TABLE services").execute(&mut *conn).await?;
+        sqlx::query("ALTER TABLE services_new RENAME TO services").execute(&mut *conn).await?;
+        Ok::<(), sqlx::Error>(())
+    }
+    .await;
+
+    match migration {
+        Ok(()) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            sqlx::query("PRAGMA foreign_keys = ON").execute(&mut *conn).await?;
+            tracing::info!("已移除 services.hostname 旧列");
+            Ok(())
+        }
+        Err(error) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            let _ = sqlx::query("PRAGMA foreign_keys = ON").execute(&mut *conn).await;
+            Err(error.into())
+        }
+    }
 }
 
 fn default_database_url() -> String {
