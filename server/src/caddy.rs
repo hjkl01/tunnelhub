@@ -298,4 +298,39 @@ mod tests {
     fn quotes_caddyfile_strings() {
         assert_eq!(caddy_quote("hello"), "\"hello\"");
     }
+ 
+    #[tokio::test]
+    async fn renders_navigation_redirect_and_keeps_management_fallback_last() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE services (id TEXT PRIMARY KEY, target_url TEXT NOT NULL, enabled INTEGER NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO services (id, target_url, enabled) VALUES ('test', 'http://127.0.0.1:3000', 1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let config = super::render_config(&pool, "0.0.0.0:8080", None)
+            .await
+            .unwrap();
+        assert!(config.contains("header Sec-Fetch-Mode navigate"));
+        assert!(config.contains("header Sec-Fetch-Dest document"));
+        assert!(config.contains("redir /proxy/test{uri} 302"));
+        assert!(!config.contains("(?:"));
+        let prefixed = config.find("handle_path /proxy/test/*").unwrap();
+        let navigation = config.find("handle @escape_nav_test").unwrap();
+        let escape = config.find("handle @escape_test").unwrap();
+        let fallback = config.rfind("reverse_proxy 127.0.0.1:8081").unwrap();
+        assert!(prefixed < navigation);
+        assert!(navigation < escape);
+        assert!(escape < fallback);
+    }
+
 }
