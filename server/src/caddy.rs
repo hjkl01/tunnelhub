@@ -284,7 +284,7 @@ fn split_listen(listen: &str) -> (Option<String>, String) {
 }
 
 fn caddy_quote(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\").replace('"', "\\""))
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(test)]
@@ -310,6 +310,8 @@ mod tests {
     #[test]
     fn quotes_caddyfile_strings() {
         assert_eq!(caddy_quote("hello"), "\"hello\"");
+        assert_eq!(caddy_quote("a\\b"), "\"a\\\\b\"");
+        assert_eq!(caddy_quote("a\"b"), "\"a\\\"b\"");
     }
  
     #[tokio::test]
