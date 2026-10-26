@@ -16,19 +16,21 @@ pub async fn start(
         tokio::fs::create_dir_all(parent).await?;
     }
     let initial = render_config(&pool, &listen, service_domain.as_deref()).await?;
-    tokio::fs::write(&config_path, &initial).await?;
+    let initial_path = config_path.with_extension("Caddyfile.initial");
+    tokio::fs::write(&initial_path, &initial).await?;
 
-    // Fail fast at startup instead of launching a Caddy process with an invalid
-    // generated configuration. This also makes first-run failures actionable.
+    // Validate the candidate before replacing the active Caddyfile. A bad
+    // generated config must never overwrite the last known-good config.
     let validation = Command::new(&binary)
         .args(["validate", "--config"])
-        .arg(&config_path)
+        .arg(&initial_path)
         .args(["--adapter", "caddyfile"])
         .output()
         .await?;
     if !validation.status.success() {
         let stderr = String::from_utf8_lossy(&validation.stderr);
         let stdout = String::from_utf8_lossy(&validation.stdout);
+        let _ = tokio::fs::remove_file(&initial_path).await;
         anyhow::bail!(
             "Caddy 初始配置校验失败（{}）：stdout={} stderr={}",
             validation.status,
@@ -36,6 +38,7 @@ pub async fn start(
             stderr
         );
     }
+    tokio::fs::rename(&initial_path, &config_path).await?;
 
     let child = Command::new(&binary)
         .args(["run", "--config"])
