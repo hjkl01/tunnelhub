@@ -216,7 +216,7 @@ async fn render_config(pool: &SqlitePool, listen: &str, service_domain: Option<&
     // `/proxy/{id}/` prefix, but the browser still sends a Referer pointing at
     // the embedded page, so route them back to the same upstream as if the app
     // were served at the origin root.
-    for (id, scheme, dial, _base_path) in &upstreams {
+    for (id, scheme, dial, base_path) in &upstreams {
         let prefix = format!("/proxy/{id}");
         let safe = id.replace('-', "_");
 
@@ -232,7 +232,13 @@ async fn render_config(pool: &SqlitePool, listen: &str, service_domain: Option<&
             "        @escape_{safe} header_regexp escape_ref_{safe} Referer \"://[^/]+/proxy/{id}(/|$)\"\n"
         ));
         config.push_str(&format!(
-            "        handle @escape_{safe} {{\n            forward_auth 127.0.0.1:8081 {{\n                uri /_internal/proxy-auth/{id}\n            }}\n            reverse_proxy {scheme}://{dial} {{\n                header_up X-Forwarded-Prefix {prefix}\n                header_down -X-Frame-Options\n                header_down Content-Security-Policy \"frame-ancestors 'none'\" \"frame-ancestors 'self'\"\n                header_down Location ^/(.*)$ {prefix}/$1\n            }}\n        }}\n"
+            "        handle @escape_{safe} {{\\n            forward_auth 127.0.0.1:8081 {{\\n                uri /_internal/proxy-auth/{id}\\n            }}\\n"
+        ));
+        if !base_path.is_empty() {
+            config.push_str(&format!("            rewrite * {}{{uri}}\\n", base_path));
+        }
+        config.push_str(&format!(
+            "            reverse_proxy {scheme}://{dial} {{\\n                header_up X-Forwarded-Prefix {prefix}\\n                header_down -X-Frame-Options\\n                header_down Content-Security-Policy \\"frame-ancestors 'none'\\" \\"frame-ancestors 'self'\\"\\n                header_down Location ^/(.*)$ {prefix}/$1\\n                header_down Set-Cookie \\"Path=/\\" \\"Path={prefix}/\\"\\n            }}\\n        }}\\n"
         ));
     }
 
@@ -312,7 +318,7 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query("INSERT INTO services (id, target_url, enabled) VALUES ('test', 'http://127.0.0.1:3000', 1)")
+        sqlx::query("INSERT INTO services (id, target_url, enabled) VALUES ('test', 'http://127.0.0.1:3000/base/', 1)")
             .execute(&pool)
             .await
             .unwrap();
@@ -323,6 +329,8 @@ mod tests {
         assert!(config.contains("header Sec-Fetch-Mode navigate"));
         assert!(config.contains("header Sec-Fetch-Dest document"));
         assert!(config.contains("redir /proxy/test{uri} 302"));
+        assert!(config.matches("rewrite * /base{uri}").count() >= 2);
+        assert!(config.contains("header_down Set-Cookie"));
         assert!(!config.contains("(?:"));
         let prefixed = config.find("handle_path /proxy/test/*").unwrap();
         let navigation = config.find("handle @escape_nav_test").unwrap();
