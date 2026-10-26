@@ -49,6 +49,31 @@ pub async fn start(
                 warn!(?error, "无法写入待应用的 Caddy 配置");
                 continue;
             }
+
+            // Validate the candidate before replacing the active Caddyfile. A bad
+            // generated config must never overwrite the last known-good config.
+            match Command::new(&sync_binary)
+                .args(["validate", "--config"])
+                .arg(&temp_path)
+                .args(["--adapter", "caddyfile"])
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {}
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    warn!(status = ?output.status, %stderr, %stdout, "Caddy 配置校验失败；保留旧配置");
+                    let _ = tokio::fs::remove_file(&temp_path).await;
+                    continue;
+                }
+                Err(error) => {
+                    warn!(?error, "无法执行 Caddy 配置校验；保留旧配置");
+                    let _ = tokio::fs::remove_file(&temp_path).await;
+                    continue;
+                }
+            }
+
             if let Err(error) = tokio::fs::rename(&temp_path, &sync_path).await {
                 warn!(?error, "无法替换 Caddy 配置文件");
                 continue;
@@ -57,15 +82,17 @@ pub async fn start(
                 .args(["reload", "--config"])
                 .arg(&sync_path)
                 .args(["--adapter", "caddyfile"])
-                .status()
+                .output()
                 .await
             {
-                Ok(status) if status.success() => {
+                Ok(output) if output.status.success() => {
                     applied = desired;
                     info!("Caddy 代理配置已同步");
                 }
-                Ok(status) => {
-                    warn!(?status, "Caddy 拒绝新配置；恢复旧配置并重试");
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    warn!(status = ?output.status, %stderr, %stdout, "Caddy 拒绝新配置；恢复旧配置并重试");
                     if let Err(error) = tokio::fs::write(&sync_path, &applied).await {
                         warn!(?error, "无法恢复上一次有效的 Caddy 配置");
                     }
@@ -173,11 +200,20 @@ async fn render_config(pool: &SqlitePool, listen: &str, service_domain: Option<&
     for (id, scheme, dial, _base_path) in &upstreams {
         let prefix = format!("/proxy/{id}");
         let safe = id.replace('-', "_");
+
+        // A root-absolute document navigation can be redirected back under the
+        // service prefix. This keeps subsequent page resources associated with
+        // the same service instead of falling through to TunnelHub's UI.
+        // SPA history.pushState() URLs cannot be identified reliably this way;
+        // arbitrary apps need an origin-per-service mode or app-specific rewrites.
+        config.push_str(&format!(
+            "        @escape_nav_{safe} {{\n            method GET\n            header_regexp escape_nav_ref_{safe} Referer \"://[^/]+/proxy/{id}(/|$)\"\n            header Sec-Fetch-Mode navigate\n            header Sec-Fetch-Dest document\n        }}\n        handle @escape_nav_{safe} {{\n            redir {prefix}{{uri}} 302\n        }}\n"
+        ));
         config.push_str(&format!(
             "        @escape_{safe} header_regexp escape_ref_{safe} Referer \"://[^/]+/proxy/{id}(/|$)\"\n"
         ));
         config.push_str(&format!(
-            "        handle @escape_{safe} {{\n            forward_auth 127.0.0.1:8081 {{\n                uri /_internal/proxy-auth/{id}\n            }}\n            reverse_proxy {scheme}://{dial} {{\n                header_up X-Forwarded-Prefix {prefix}\n                header_down -X-Frame-Options\n                header_down Content-Security-Policy \"frame-ancestors 'none'\" \"frame-ancestors 'self'\"\n                header_down Location ^/(.*)$ {prefix}/$1\n            }}\n        }}\n"
+            "        handle @escape_{safe} {{\n            forward_auth 127.0.0.1:8081 {{\n                uri /_internal/proxy-auth/{id}\n            }}\n            reverse_proxy {scheme}://{dial} {{\n                header_up X-Forwarded-Prefix {prefix}\n                header_down -X-Frame-Options\n                header_down Content-Security-Policy \\"frame-ancestors 'none'\\" \\"frame-ancestors 'self'\\"\n                header_down Location ^/(.*)$ {prefix}/$1\n            }}\n        }}\n"
         ));
     }
 
