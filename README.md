@@ -64,7 +64,7 @@ docker compose up -d --build
 - 宿主机上的 Home Assistant：http://host.docker.internal:8123
 - 局域网另一台机器：http://192.168.1.20:8080
 
-保存前可点击“测试 HTTP 连通性”，由 TunnelHub 后端在 5 秒内尝试请求目标地址，并显示 HTTP 状态码、最终 URL 和 Content-Type。返回 4xx/5xx 仍表示 HTTP 服务有响应，但不代表应用业务正常。若检测失败，请先确认目标地址、端口、容器网络和服务监听地址。保存后，服务可通过同源路径 `/proxy/{service_id}/` 在任何 Host 下访问；若额外设置了 `TUNNELHUB_SERVICE_DOMAIN`，还可通过服务子域 `<service_id>.<TUNNELHUB_SERVICE_DOMAIN>/` 在根路径访问（需要通配 DNS）。管理页面的内嵌视图默认使用同源路径，以便在任意域名（包括 FRP 域名）下工作；配置了服务子域时改用子域根路径，便于硬编码根绝对路径的应用（如 Next.js）加载。启用服务后，Caddy 会自动同步对应的代理路由；停用或删除服务后路由也会同步更新。
+保存前可点击“测试 HTTP 连通性”，由 TunnelHub 后端在 5 秒内尝试请求目标地址，并显示 HTTP 状态码、最终 URL 和 Content-Type。返回 4xx/5xx 仍表示 HTTP 服务有响应，但不代表应用业务正常。若检测失败，请先确认目标地址、端口、容器网络和服务监听地址。保存后，服务可通过同源路径 `/proxy/{service_id}/` 在任何 Host 下访问；若额外设置了 `TUNNELHUB_SERVICE_DOMAIN`，还可通过服务子域 `<service_id>.<TUNNELHUB_SERVICE_DOMAIN>/` 在根路径访问（需要通配 DNS）。管理页面的内嵌视图始终使用同源路径 `/proxy/{service_id}/`，因此在任意域名（包括 FRP 域名）下都能直接打开，不需要为内嵌视图配置任何域名。启用服务后，Caddy 会自动同步对应的代理路由；停用或删除服务后路由也会同步更新。
 
 容器内的 `localhost` 指向容器自身，不是宿主机，因此在目标地址中不要使用 `localhost` 访问宿主机服务，应使用 `host.docker.internal`。Compose 已为 Linux Docker 配置 host.docker.internal:host-gateway。在 Linux bridge 网络中，目标服务必须监听可从 Docker 网桥到达的接口，只监听宿主机 127.0.0.1 的服务通常无法访问；Docker Desktop（macOS/Windows）通常可将 host.docker.internal 转发到宿主机 127.0.0.1。
 
@@ -92,4 +92,4 @@ make build
 - 业务用户目前使用密码登录，尚未支持业务用户 TOTP 或细粒度读写权限。
 - 访问日志记录 Caddy forward-auth 的鉴权结果（放行 / 需登录 / 无权限 / 服务不存在），仅保留最近 5000 条；不记录上游服务的响应状态和响应体。
 - Caddy 自动同步服务路由；容器入口仍为 HTTP，TLS/FRP/DNS 由部署者按需配置。
-- 代理会重写部分根路径重定向和 Cookie Path；对于硬编码根绝对路径的应用（如 Next.js 的 `/_next/...`、`/api/...`），除按请求 `Referer` 回退外，管理页内嵌视图默认使用同源 `/proxy/{service_id}/` 路径；配置 `TUNNELHUB_SERVICE_DOMAIN` 后改用服务子域，使应用运行在独立源的根路径，避免客户端路由/动态 chunk 因丢失前缀而失败。使用子域需要浏览器能解析 `*.<TUNNELHUB_SERVICE_DOMAIN>`。若目标应用通过 CSP、X-Frame-Options 禁止 iframe，仍可能需要单独调整应用配置。
+- 代理会重写部分根路径重定向和 Cookie Path；对于硬编码根绝对路径的应用（如 Next.js 的 `/_next/...`、`/api/...`），除按请求 `Referer` 回退外，管理页内嵌视图始终使用同源 `/proxy/{service_id}/` 路径，不需要配置域名。若应用存在无法通过 `Referer` 回退的硬编码根路径（例如客户端路由直接跳到 `/`），可通过设置 `TUNNELHUB_SERVICE_DOMAIN` 额外启用服务子域 `<id>.<TUNNELHUB_SERVICE_DOMAIN>`，让应用运行在独立源的根路径（需要通配 DNS）。若目标应用通过 CSP、X-Frame-Options 禁止 iframe，仍可能需要单独调整应用配置。

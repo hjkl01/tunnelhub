@@ -252,7 +252,6 @@ function useHashRoute(): Route {
 }
 
 function ServicesPage({ services, loading, error, refresh }: { services: Service[]; loading: boolean; error: string; refresh: () => Promise<void> }) {
-  const [serviceDomain, setServiceDomain] = useState('')
   const [query, setQuery] = useState('')
   const [dialog, setDialog] = useState(false)
   const [editing, setEditing] = useState<Service | null>(null)
@@ -266,12 +265,6 @@ function ServicesPage({ services, loading, error, refresh }: { services: Service
   const [viewerMaximized, setViewerMaximized] = useState(false)
 
   useEffect(() => {
-    void api<{ service_domain?: string | null }>('/api/health')
-      .then((health) => setServiceDomain(health.service_domain || ''))
-      .catch(() => setServiceDomain(''))
-  }, [])
-
-  useEffect(() => {
     if (!viewerMaximized) return
     const previous = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -283,13 +276,10 @@ function ServicesPage({ services, loading, error, refresh }: { services: Service
     }
   }, [viewerMaximized])
 
-  const serviceOrigin = (id: string) => {
-    // Without an explicit service domain, use same-origin path routing so the
-    // embedded view works on any host (for example a domain exposed through FRP).
-    if (!serviceDomain) return `${window.location.origin}/proxy/${id}`
-    const port = window.location.port ? `:${window.location.port}` : ''
-    return `${window.location.protocol}//${id}.${serviceDomain}${port}`
-  }
+  // 内嵌视图始终使用当前来源下的路径路由 /proxy/<id>/，这样无需配置任何域名
+  // （例如通过 FRP 暴露本服务时，任意域名都能直接使用）。子域名路由只是可选的
+  // 额外入口，不作为管理界面的打开方式。
+  const serviceOrigin = (id: string) => `${window.location.origin}/proxy/${id}`
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
