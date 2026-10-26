@@ -188,6 +188,10 @@ async fn render_config(pool: &SqlitePool, listen: &str, service_domain: Option<&
     // over the root-path fallback below.
     for (id, scheme, dial, base_path) in &upstreams {
         let prefix = format!("/proxy/{id}");
+        // Canonicalize the bare service URL; the path matcher below requires a slash.
+        config.push_str(&format!(
+            "        handle {prefix} {{\n            redir {prefix}/ 308\n        }}\n"
+        ));
         // Keep the login endpoint on Rust; all ordinary traffic is proxied by Caddy.
         config.push_str(&format!(
             "        handle {prefix}/.tunnelhub/login {{\n            reverse_proxy 127.0.0.1:8081\n        }}\n"
@@ -329,6 +333,7 @@ mod tests {
         assert!(config.contains("header Sec-Fetch-Mode navigate"));
         assert!(config.contains("header Sec-Fetch-Dest document"));
         assert!(config.contains("redir /proxy/test{uri} 302"));
+        assert!(config.contains("redir /proxy/test/ 308"));
         assert!(config.matches("rewrite * /base{uri}").count() >= 2);
         assert!(config.contains("header_down Set-Cookie"));
         assert!(!config.contains("(?:"));
