@@ -1,8 +1,10 @@
 /target/
+/tunnelhub-server
 /data/
 /frontend/node_modules/
 /frontend/dist/
 /frontend/.vite/
+/frontend/tsconfig.tsbuildinfo
 *.db
 *.db-shm
 *.db-wal
