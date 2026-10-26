@@ -18,6 +18,25 @@ pub async fn start(
     let initial = render_config(&pool, &listen, service_domain.as_deref()).await?;
     tokio::fs::write(&config_path, &initial).await?;
 
+    // Fail fast at startup instead of launching a Caddy process with an invalid
+    // generated configuration. This also makes first-run failures actionable.
+    let validation = Command::new(&binary)
+        .args(["validate", "--config"])
+        .arg(&config_path)
+        .args(["--adapter", "caddyfile"])
+        .output()
+        .await?;
+    if !validation.status.success() {
+        let stderr = String::from_utf8_lossy(&validation.stderr);
+        let stdout = String::from_utf8_lossy(&validation.stdout);
+        anyhow::bail!(
+            "Caddy 初始配置校验失败（{}）：stdout={} stderr={}",
+            validation.status,
+            stdout,
+            stderr
+        );
+    }
+
     let child = Command::new(&binary)
         .args(["run", "--config"])
         .arg(&config_path)
