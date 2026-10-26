@@ -1,6 +1,6 @@
 use argon2::{password_hash::{PasswordHasher, SaltString}, Argon2};
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
     Json, Router,
@@ -9,6 +9,7 @@ use chrono::{SecondsFormat, Utc};
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::env;
 use url::Url;
 use uuid::Uuid;
 
@@ -68,6 +69,8 @@ struct TestTargetResult {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/test-target", post(test_target))
+        .route("/network", get(network_info))
+        .route("/logs", get(list_logs))
         .route("/", get(list_services).post(create_service))
         .route("/{id}", get(get_service).put(update_service).delete(delete_service))
         .route("/{id}/acl", get(get_acl).put(update_acl))
@@ -76,6 +79,121 @@ pub fn router() -> Router<AppState> {
         .route("/access/groups", get(list_groups).post(create_group))
         .route("/access/groups/{id}", axum::routing::put(update_group).delete(delete_group))
         
+}
+
+#[derive(Debug, Deserialize)]
+struct LogQuery {
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+struct AccessLogRow {
+    id: i64,
+    service_id: String,
+    service_name: Option<String>,
+    method: Option<String>,
+    path: Option<String>,
+    client_ip: Option<String>,
+    user_agent: Option<String>,
+    username: Option<String>,
+    status: i64,
+    created_at: String,
+}
+
+async fn list_logs(
+    State(state): State<AppState>,
+    Query(query): Query<LogQuery>,
+) -> Result<Json<Vec<AccessLogRow>>, (StatusCode, Json<ApiError>)> {
+    let limit = query.limit.unwrap_or(100).clamp(1, 500);
+    let rows = sqlx::query_as::<_, AccessLogRow>(
+        "SELECT l.id, l.service_id, s.name AS service_name, l.method, l.path, l.client_ip, l.user_agent, m.username, l.status, l.created_at \
+         FROM access_logs l \
+         LEFT JOIN services s ON s.id = l.service_id \
+         LEFT JOIN members m ON m.id = l.member_id \
+         ORDER BY l.id DESC LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(&state.pool)
+    .await
+    .map_err(internal_error)?;
+    Ok(Json(rows))
+}
+
+#[derive(Debug, Serialize)]
+struct NetworkInfo {
+    version: String,
+    listen: String,
+    caddy_enabled: bool,
+    caddy_listen: Option<String>,
+    caddy_config_path: Option<String>,
+    caddy_config_exists: bool,
+    ui_host: Option<String>,
+    service_domain: Option<String>,
+    cookie_secure: bool,
+    database_url: Option<String>,
+    total_services: i64,
+    enabled_services: i64,
+    caddyfile: Option<String>,
+}
+
+fn env_non_empty(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn env_flag(name: &str) -> bool {
+    env_non_empty(name)
+        .map(|value| value.eq_ignore_ascii_case("true") || value == "1")
+        .unwrap_or(false)
+}
+
+async fn network_info(
+    State(state): State<AppState>,
+) -> Result<Json<NetworkInfo>, (StatusCode, Json<ApiError>)> {
+    let total_services: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM services")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(internal_error)?;
+    let enabled_services: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM services WHERE enabled = 1")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(internal_error)?;
+    let caddy_enabled = env_flag("TUNNELHUB_CADDY_ENABLED");
+    let caddy_config_path = env_non_empty("TUNNELHUB_CADDY_CONFIG");
+    let caddy_config_exists = match &caddy_config_path {
+        Some(path) => tokio::fs::metadata(path).await.is_ok(),
+        None => false,
+    };
+    let caddyfile = match &caddy_config_path {
+        Some(path) if caddy_config_exists => tokio::fs::read_to_string(path).await.ok(),
+        _ => None,
+    };
+    let listen = env_non_empty("TUNNELHUB_LISTEN").unwrap_or_else(|| {
+        if caddy_enabled {
+            "127.0.0.1:8081".to_string()
+        } else {
+            "0.0.0.0:8080".to_string()
+        }
+    });
+    Ok(Json(NetworkInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        listen,
+        caddy_enabled,
+        caddy_listen: env_non_empty("TUNNELHUB_CADDY_LISTEN"),
+        caddy_config_path,
+        caddy_config_exists,
+        ui_host: env_non_empty("TUNNELHUB_UI_HOST"),
+        service_domain: crate::proxy::service_domain(),
+        cookie_secure: env_non_empty("TUNNELHUB_COOKIE_SECURE")
+            .map(|value| !value.eq_ignore_ascii_case("false"))
+            .unwrap_or(true),
+        database_url: env_non_empty("TUNNELHUB_DATABASE_URL"),
+        total_services,
+        enabled_services,
+        caddyfile,
+    }))
 }
 
 async fn test_target(

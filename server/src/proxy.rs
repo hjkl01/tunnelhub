@@ -34,17 +34,22 @@ pub async fn authorize_proxy(
     .await;
     let access_mode = match service {
         Ok(Some(value)) => value,
-        Ok(None) => return plain(StatusCode::NOT_FOUND, "服务不存在或已停用"),
+        Ok(None) => {
+            record_access(&state, &service_id, None, &headers, StatusCode::NOT_FOUND).await;
+            return plain(StatusCode::NOT_FOUND, "服务不存在或已停用");
+        }
         Err(error) => {
             tracing::error!(?error, "Caddy 代理授权检查失败");
             return plain(StatusCode::INTERNAL_SERVER_ERROR, "授权检查失败");
         }
     };
     if access_mode == "public" {
+        record_access(&state, &service_id, None, &headers, StatusCode::OK).await;
         return plain(StatusCode::OK, "ok");
     }
 
     let Some(member_id) = member_from_request(&state, &headers).await else {
+        record_access(&state, &service_id, None, &headers, StatusCode::FOUND).await;
         let mut response = Response::new(Body::empty());
         *response.status_mut() = StatusCode::FOUND;
         if let Ok(location) = HeaderValue::from_str(&format!("/proxy/{service_id}/.tunnelhub/login")) {
@@ -61,13 +66,68 @@ pub async fn authorize_proxy(
     .fetch_one(&state.pool)
     .await;
     match allowed {
-        Ok(count) if count > 0 => plain(StatusCode::OK, "ok"),
-        Ok(_) => plain(StatusCode::FORBIDDEN, "你的账户没有访问此服务的权限"),
+        Ok(count) if count > 0 => {
+            record_access(&state, &service_id, Some(member_id), &headers, StatusCode::OK).await;
+            plain(StatusCode::OK, "ok")
+        }
+        Ok(_) => {
+            record_access(&state, &service_id, Some(member_id), &headers, StatusCode::FORBIDDEN).await;
+            plain(StatusCode::FORBIDDEN, "你的账户没有访问此服务的权限")
+        }
         Err(error) => {
             tracing::error!(?error, "读取服务 ACL 失败");
             plain(StatusCode::INTERNAL_SERVER_ERROR, "授权检查失败")
         }
     }
+}
+
+fn first_header(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+/// Caddy 在转发鉴权请求时会附带原始请求的 X-Forwarded-* 头，这里把它们落库，
+/// 供“访问日志”页面展示。状态码表示鉴权结果（200 放行 / 302 需登录 /
+/// 403 无权限 / 404 服务不存在）。
+async fn record_access(
+    state: &AppState,
+    service_id: &str,
+    member_id: Option<i64>,
+    headers: &HeaderMap,
+    status: StatusCode,
+) {
+    let method = first_header(headers, "x-forwarded-method");
+    let path = first_header(headers, "x-forwarded-uri");
+    let client_ip = first_header(headers, "x-forwarded-for")
+        .map(|value| value.split(',').next().unwrap_or_default().trim().to_string())
+        .filter(|value| !value.is_empty());
+    let user_agent = first_header(headers, "user-agent");
+    let created_at = Utc::now().to_rfc3339();
+    if let Err(error) = sqlx::query(
+        "INSERT INTO access_logs (service_id, member_id, method, path, client_ip, user_agent, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(service_id)
+    .bind(member_id)
+    .bind(method)
+    .bind(path)
+    .bind(client_ip)
+    .bind(user_agent)
+    .bind(i64::from(status.as_u16()))
+    .bind(created_at)
+    .execute(&state.pool)
+    .await
+    {
+        tracing::warn!(?error, "写入访问日志失败");
+        return;
+    }
+    // 只保留最近 5000 条，避免日志表无限增长。
+    let _ = sqlx::query("DELETE FROM access_logs WHERE id <= (SELECT MAX(id) FROM access_logs) - 5000")
+        .execute(&state.pool)
+        .await;
 }
 
 pub async fn handle(State(state): State<AppState>, request: Request<Body>) -> Response {

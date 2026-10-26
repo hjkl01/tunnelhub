@@ -91,6 +91,10 @@ async fn main() -> anyhow::Result<()> {
         .execute(&pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_member_login_attempts_user_time ON member_login_attempts(username, attempted_at)")
         .execute(&pool).await?;
+    sqlx::query("CREATE TABLE IF NOT EXISTS access_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, service_id TEXT NOT NULL, member_id INTEGER, method TEXT, path TEXT, client_ip TEXT, user_agent TEXT, status INTEGER NOT NULL, created_at TEXT NOT NULL)")
+        .execute(&pool).await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs(created_at)")
+        .execute(&pool).await?;
 
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
