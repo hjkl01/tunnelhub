@@ -24,3 +24,15 @@ a.nav-item{text-decoration:none;color:inherit}.access-page{scroll-margin-top:20p
 
 .viewer-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.viewer-tabs{display:flex;align-items:center;gap:6px;overflow-x:auto;flex:1;min-width:0;padding:2px}.viewer-tab{display:flex;align-items:center;flex-shrink:0;border:1px solid #e4e7ed;border-radius:7px;background:#f7f8fa}.viewer-tab.active{background:#eef1f7;border-color:#ccd5e5}.viewer-tab-label{border:0;background:transparent;padding:7px 4px 7px 10px;font-size:12px;color:#5b6577;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.viewer-tab.active .viewer-tab-label{color:#252e43;font-weight:600}.viewer-tab-close{border:0;background:transparent;display:grid;place-items:center;color:#98a0af;padding:5px;margin-right:3px;border-radius:5px}.viewer-tab-close:hover{background:#e3e7ee;color:#30394c}.viewer-frames{display:block}.embedded-viewer .viewer-frames iframe.hidden{display:none}.embedded-viewer.maximized .viewer-frames{flex:1;min-height:0;display:flex;flex-direction:column}.embedded-viewer.maximized .viewer-frames iframe{height:100%;min-height:0;flex:1}
 @media(max-width:760px){.viewer-tab-label{max-width:110px}}
+
+
+/* 让管理内容尽量占满视口；左侧导航是唯一常驻的管理框架。 */
+.topbar{display:none}
+.page-content{width:100%;max-width:none;margin:0;padding:16px 20px 20px}
+.embedded-viewer{display:flex;flex-direction:column;height:calc(100vh - 32px);min-height:520px;margin-bottom:16px;border-radius:8px}
+.embedded-viewer .panel-heading{flex-shrink:0;padding:10px 14px}
+.embedded-viewer .viewer-frames{flex:1;min-height:0;display:flex;flex-direction:column}
+.embedded-viewer .viewer-frames iframe{height:100%;min-height:0;flex:1}
+.embedded-viewer.maximized{height:100dvh;min-height:0}
+.page-content>.panel:not(.embedded-viewer){margin-bottom:16px}
+@media(max-width:760px){.page-content{padding:10px}.embedded-viewer{height:calc(100dvh - 20px);min-height:420px}.embedded-viewer .panel-heading{padding:8px}}
