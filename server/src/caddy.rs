@@ -233,7 +233,7 @@ async fn render_config(pool: &SqlitePool, listen: &str, service_domain: Option<&
         // SPA history.pushState() URLs cannot be identified reliably this way;
         // arbitrary apps need an origin-per-service mode or app-specific rewrites.
         config.push_str(&format!(
-            "        @escape_nav_{safe} {{\n            method GET\n            header_regexp escape_nav_ref_{safe} Referer \"://[^/]+/proxy/{id}(/|$)\"\n            header Sec-Fetch-Mode navigate\n            header Sec-Fetch-Dest document\n        }}\n        handle @escape_nav_{safe} {{\n            redir {prefix}{{uri}} 302\n        }}\n"
+            "        @escape_nav_{safe} {{\n            method GET\n            header_regexp escape_nav_ref_{safe} Referer \"://[^/]+/proxy/{id}(/|$)\"\n            header Sec-Fetch-Mode navigate\n            header_regexp escape_nav_dest_{safe} Sec-Fetch-Dest \"^(document|iframe)$\"\n        }}\n        handle @escape_nav_{safe} {{\n            redir {prefix}{{uri}} 302\n        }}\n"
         ));
         config.push_str(&format!(
             "        @escape_{safe} header_regexp escape_ref_{safe} Referer \"://[^/]+/proxy/{id}(/|$)\"\n"
@@ -334,7 +334,8 @@ mod tests {
             .await
             .unwrap();
         assert!(config.contains("header Sec-Fetch-Mode navigate"));
-        assert!(config.contains("header Sec-Fetch-Dest document"));
+        assert!(config.contains("Sec-Fetch-Dest"));
+        assert!(config.contains("iframe"));
         assert!(config.contains("redir /proxy/test{uri} 302"));
         assert!(config.contains("redir /proxy/test/ 308"));
         assert!(config.matches("rewrite * /base{uri}").count() >= 2);
