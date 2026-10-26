@@ -213,7 +213,7 @@ async fn render_config(pool: &SqlitePool, listen: &str, service_domain: Option<&
             "        @escape_{safe} header_regexp escape_ref_{safe} Referer \"://[^/]+/proxy/{id}(/|$)\"\n"
         ));
         config.push_str(&format!(
-            "        handle @escape_{safe} {{\n            forward_auth 127.0.0.1:8081 {{\n                uri /_internal/proxy-auth/{id}\n            }}\n            reverse_proxy {scheme}://{dial} {{\n                header_up X-Forwarded-Prefix {prefix}\n                header_down -X-Frame-Options\n                header_down Content-Security-Policy \\"frame-ancestors 'none'\\" \\"frame-ancestors 'self'\\"\n                header_down Location ^/(.*)$ {prefix}/$1\n            }}\n        }}\n"
+            "        handle @escape_{safe} {{\n            forward_auth 127.0.0.1:8081 {{\n                uri /_internal/proxy-auth/{id}\n            }}\n            reverse_proxy {scheme}://{dial} {{\n                header_up X-Forwarded-Prefix {prefix}\n                header_down -X-Frame-Options\n                header_down Content-Security-Policy \"frame-ancestors 'none'\" \"frame-ancestors 'self'\"\n                header_down Location ^/(.*)$ {prefix}/$1\n            }}\n        }}\n"
         ));
     }
 
@@ -252,7 +252,7 @@ fn split_listen(listen: &str) -> (Option<String>, String) {
 }
 
 fn caddy_quote(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    format!("\"{}\"", value.replace('\\', "\\\").replace('"', "\\""))
 }
 
 #[cfg(test)]
